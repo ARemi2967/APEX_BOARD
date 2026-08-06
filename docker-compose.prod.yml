@@ -1,0 +1,19 @@
+# Production compose — uses a pre-built/imported image (no Docker Hub, no build).
+# For image-import deploys (e.g. 宝塔 panel): `docker load` the image, then:
+#   docker compose -f docker-compose.prod.yml up -d
+services:
+  web:
+    image: apex-bord:latest
+    container_name: apex-bord
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Env / secrets
+.env
+.env.local
+
+# Data (SQLite + WAL files)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Exported image artifacts (for image-import deploys)
+*.tar
+*.tar.gz
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

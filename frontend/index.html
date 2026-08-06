@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APEX BOARD · 战绩</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg" />
+  <link rel="stylesheet" href="/assets/css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">▲</span>
+      <span class="brand-name">APEX<span class="accent"> BOARD</span></span>
+    </div>
+    <div class="controls">
+      <select id="player-select" class="select" title="选择追踪的玩家">
+        <option value="">加载中…</option>
+      </select>
+      <span id="last-updated" class="last-updated">—</span>
+      <button id="refresh-btn" class="btn" title="刷新当前战绩">↻ 刷新</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section id="player-banner" class="banner" hidden>
+      <div class="banner-id">
+        <span id="banner-name" class="banner-name">—</span>
+        <span class="banner-sub"><span id="rt-badge" class="rt-badge rt-offline">—</span></span>
+      </div>
+      <div class="banner-rankwrap">
+        <img id="rank-badge" class="rank-badge" src="" alt="" hidden />
+        <div class="banner-ranktext">
+          <span id="banner-rank" class="banner-rank">—</span>
+          <span id="banner-rp" class="banner-rp"></span>
+          <span id="banner-delta-rp" class="banner-delta"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="today-report" class="today-report" hidden>
+      <div class="today-cell"><div class="today-label">今日击杀</div><div class="today-val" data-today="kills">—</div></div>
+      <div class="today-cell"><div class="today-label">今日伤害</div><div class="today-val" data-today="damage">—</div></div>
+      <div class="today-cell today-rp"><div class="today-label">今日 RP</div><div class="today-val" data-today="rank_score">—</div></div>
+    </section>
+
+    <section class="chart-card activity-card">
+      <h2 class="chart-title">今日各传奇 <span class="chart-sub">今日击杀 / 伤害</span></h2>
+      <div id="activity-list" class="activity-list"></div>
+      <p id="activity-empty" class="empty-state" hidden>今日暂无对战数据（快照每 10 分钟积累）。</p>
+    </section>
+
+    <section class="kpi-grid" id="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">段位</div><div class="kpi-value" data-kpi="rank">—</div><div class="kpi-delta"></div></div>
+      <div class="kpi-card"><div class="kpi-label">等级</div><div class="kpi-value" data-kpi="level">—</div><div class="kpi-delta" data-delta="level"></div></div>
+      <div class="kpi-card"><div class="kpi-label">击杀</div><div class="kpi-value" data-kpi="kills">—</div><div class="kpi-delta" data-delta="kills"></div></div>
+      <div class="kpi-card"><div class="kpi-label">伤害</div><div class="kpi-value" data-kpi="damage">—</div><div class="kpi-delta" data-delta="damage"></div></div>
+    </section>
+
+    <section class="chart-card">
+      <div class="chart-head">
+        <h2 class="chart-title">7 日趋势</h2>
+        <div class="metric-toggle" id="metric-toggle">
+          <button class="chip is-active" data-metric="damage">伤害</button>
+          <button class="chip" data-metric="kills">击杀</button>
+          <button class="chip" data-metric="rank_score">段位分</button>
+          <button class="chip" data-metric="rank_delta">段位变化</button>
+        </div>
+      </div>
+      <div id="trend-chart" class="chart"></div>
+      <p id="trend-empty" class="empty-state" hidden>该指标暂无数据 —— 快照每 10 分钟自动积累。</p>
+    </section>
+
+    <section class="dual-grid">
+      <div class="chart-card">
+        <h2 class="chart-title">各传奇战绩 <span class="chart-sub">击杀与伤害</span></h2>
+        <div id="featured-legend" class="featured-legend" hidden></div>
+        <div id="legends-list" class="legend-list"></div>
+        <p id="legends-empty" class="empty-state" hidden>暂无传奇数据。</p>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head">
+          <h2 class="chart-title">段位进度 <span class="chart-sub">段位分变化</span></h2>
+          <img id="rank-progress-badge" class="rank-progress-badge" src="" alt="" hidden />
+        </div>
+        <div id="rank-chart" class="chart"></div>
+        <p id="rank-empty" class="empty-state" hidden>快照不足，暂无法展示进度。</p>
+      </div>
+    </section>
+
+    <section class="dual-grid">
+      <div class="chart-card">
+        <h2 class="chart-title">武器精通 <span class="chart-sub">账号总击杀 · 各传奇共用</span></h2>
+        <div id="weapon-chart" class="chart"></div>
+        <p id="weapon-empty" class="empty-state" hidden>暂无武器精通数据。</p>
+      </div>
+      <div class="chart-card">
+        <h2 class="chart-title">武器伤害 <span class="chart-sub">账号总伤害 · 各传奇共用</span></h2>
+        <div id="weapon-damage-chart" class="chart"></div>
+        <p id="weapon-damage-empty" class="empty-state" hidden>暂无武器伤害数据。</p>
+      </div>
+    </section>
+
+    <section class="chart-card">
+      <h2 class="chart-title">每日记录 <span class="chart-sub">各传奇 · 近 7 天 击杀 / 伤害</span></h2>
+      <div class="records-wrap"><table id="records-table" class="records-table"></table></div>
+      <p id="records-empty" class="empty-state" hidden>暂无记录（快照每 10 分钟积累）。</p>
+    </section>
+
+    <footer class="footer">
+      实时数据来自 apexlegendsapi.com · 历史趋势由本地快照积累
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/charts.js"></script>
+  <script src="/assets/js/app.js"></script>
+</body>
+</html>

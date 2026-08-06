@@ -1,0 +1,444 @@
+/* APEX_bord — tactical HUD theme.
+   Angular clipped cards, neon red/amber, technical grid backdrop. */
+
+:root {
+  --bg: #08090d;
+  --bg-elev: #11131a;
+  --card: #161922;
+  --card-hi: #1d2130;
+  --border: #262b3a;
+  --border-hi: #353c50;
+  --text: #eceef4;
+  --text-dim: #98a0b2;
+  --text-mute: #5c6477;
+  --accent: #ff3b3b;
+  --accent-deep: #c8102e;
+  --accent-soft: rgba(255, 59, 59, 0.16);
+  --amber: #ffb454;
+  --amber-soft: rgba(255, 180, 84, 0.14);
+  --radius: 4px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --clip: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+
+body {
+  min-height: 100vh;
+  color: var(--text);
+  font-family: "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1000px 460px at 78% -8%, rgba(255, 59, 59, 0.14), transparent 60%),
+    radial-gradient(820px 400px at -8% 4%, rgba(255, 180, 84, 0.08), transparent 58%),
+    var(--bg);
+}
+
+/* technical grid backdrop, fading toward the bottom */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 10%, transparent 80%);
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 10%, transparent 80%);
+}
+
+/* ---------- top bar ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 14px 26px;
+  background: linear-gradient(180deg, rgba(8, 9, 13, 0.92), rgba(8, 9, 13, 0.7));
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark {
+  color: var(--accent); font-size: 22px; line-height: 1;
+  filter: drop-shadow(0 0 10px rgba(255, 59, 59, 0.7));
+  animation: pulse 3.2s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.brand-name {
+  font-family: "Chakra Petch", sans-serif; font-weight: 700;
+  letter-spacing: 2px; font-size: 19px;
+}
+.brand-name .accent { color: var(--accent); }
+
+.controls { display: flex; align-items: center; gap: 12px; }
+.select, .btn {
+  font: 500 13px "Chakra Petch", sans-serif; letter-spacing: 0.6px;
+  color: var(--text); background: var(--card);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 9px 14px; cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.select:hover, .btn:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft), 0 0 16px var(--accent-soft);
+}
+.btn { text-transform: uppercase; }
+.btn:active { transform: translateY(1px); }
+.select:focus, .btn:focus { outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+.last-updated {
+  font-size: 12px; color: var(--text-mute); white-space: nowrap;
+  font-family: "Chakra Petch", sans-serif; letter-spacing: 0.5px;
+}
+
+/* ---------- layout ---------- */
+.container { max-width: 1180px; margin: 0 auto; padding: 26px 24px 40px; }
+
+/* ---------- banner ---------- */
+.banner {
+  position: relative;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; padding: 22px 26px; margin-bottom: 26px;
+  background: linear-gradient(120deg, var(--card) 10%, var(--bg-elev));
+  border: 1px solid var(--border);
+  clip-path: var(--clip);
+  filter: drop-shadow(0 10px 26px rgba(0, 0, 0, 0.4));
+  animation: riseIn 0.5s both;
+}
+.banner::after {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(180deg, var(--accent), var(--amber));
+}
+.banner-id { display: flex; flex-direction: column; gap: 4px; }
+.banner-name {
+  font-family: "Chakra Petch", sans-serif; font-weight: 700;
+  font-size: 28px; letter-spacing: 1px; line-height: 1;
+}
+.banner-uid { font-size: 12px; color: var(--text-mute); letter-spacing: 0.8px; font-family: "Chakra Petch", sans-serif; }
+.banner-rankwrap { display: flex; align-items: center; gap: 16px; }
+.rank-badge {
+  width: 66px; height: 66px; object-fit: contain;
+  border-radius: 50%; padding: 6px; box-sizing: border-box;
+  animation: rankGlow 2.6s ease-in-out infinite;
+}
+/* 段位配色（背景 + 发光颜色）—— 通用 .t-* 类，徽章和进度卡徽章共用 */
+.t-bronze { --tc: #b06a2f; background: rgba(176, 106, 47, 0.22); }
+.t-silver { --tc: #d4d8e0; background: rgba(212, 216, 224, 0.18); }
+.t-gold { --tc: #ffcf3a; background: rgba(255, 207, 58, 0.2); }
+.t-platinum { --tc: #2fd4c4; background: rgba(47, 212, 196, 0.2); }
+.t-diamond { --tc: #4aa3ff; background: rgba(74, 163, 255, 0.2); }
+.t-master { --tc: #b14dff; background: rgba(177, 77, 255, 0.22); }
+.t-predator { --tc: #ff3b3b; background: rgba(255, 59, 59, 0.22); }
+.t-unranked { --tc: #d4d8e0; background: rgba(212, 216, 224, 0.12); }
+@keyframes rankGlow {
+  0%, 100% { box-shadow: 0 0 8px 1px var(--tc, #fff); }
+  50% { box-shadow: 0 0 24px 4px var(--tc, #fff); }
+}
+.banner-ranktext { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.banner-rank {
+  font-family: "Chakra Petch", sans-serif; font-weight: 700;
+  font-size: 22px; color: var(--amber); letter-spacing: 0.6px;
+  text-shadow: 0 0 18px rgba(255, 180, 84, 0.4);
+}
+.banner-rp { font-size: 13px; color: var(--text-dim); font-family: "Chakra Petch", sans-serif; letter-spacing: 0.6px; }
+
+/* ---------- KPI grid ---------- */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 26px; }
+.kpi-card {
+  position: relative;
+  background: linear-gradient(150deg, var(--card), var(--bg-elev));
+  clip-path: var(--clip);
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.38));
+  padding: 20px 18px 18px;
+  transition: transform 0.18s, filter 0.18s;
+  animation: riseIn 0.5s both;
+}
+.kpi-card:nth-child(1) { animation-delay: 0.04s; }
+.kpi-card:nth-child(2) { animation-delay: 0.09s; }
+.kpi-card:nth-child(3) { animation-delay: 0.14s; }
+.kpi-card:nth-child(4) { animation-delay: 0.19s; }
+.kpi-card:nth-child(5) { animation-delay: 0.24s; }
+.kpi-card:nth-child(6) { animation-delay: 0.29s; }
+.kpi-card:hover { transform: translateY(-3px); filter: drop-shadow(0 10px 22px rgba(255, 59, 59, 0.18)); }
+.kpi-card::before {
+  content: ""; position: absolute; top: 0; right: 0;
+  width: 22px; height: 22px; background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 100% 100%); opacity: 0.85;
+}
+.kpi-label {
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.8px;
+  color: var(--text-mute); margin-bottom: 10px;
+}
+.kpi-label::before { content: "[ "; color: var(--accent); }
+.kpi-label::after { content: " ]"; color: var(--accent); }
+.kpi-value {
+  font-family: "Chakra Petch", sans-serif; font-weight: 700;
+  font-size: 30px; line-height: 1; color: var(--text);
+}
+.kpi-value.is-na { color: var(--text-mute); font-size: 26px; }
+
+/* ---------- charts ---------- */
+.chart-card {
+  position: relative;
+  background: linear-gradient(150deg, var(--card), var(--bg-elev));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px 10px; margin-bottom: 24px;
+  box-shadow: var(--shadow);
+  animation: riseIn 0.55s 0.18s both;
+}
+.chart-card::before {
+  content: ""; position: absolute; top: -1px; left: -1px; width: 60px; height: 3px;
+  background: var(--accent);
+}
+.chart-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.chart-title {
+  font-family: "Chakra Petch", sans-serif; font-weight: 600;
+  font-size: 15px; margin: 0; letter-spacing: 1px; text-transform: uppercase;
+}
+.chart-sub { color: var(--text-mute); font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0.4px; }
+.chart { width: 100%; height: 300px; }
+
+.metric-toggle { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  font: 600 11px "Chakra Petch", sans-serif; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--text-dim);
+  background: transparent; border: 1px solid var(--border);
+  padding: 6px 12px; cursor: pointer; transition: all 0.15s;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.chip:hover { color: var(--text); border-color: var(--accent); }
+.chip.is-active { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 0 14px var(--accent-soft); }
+
+.dual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.dual-grid .chart-card { margin-bottom: 0; }
+.empty-state { color: var(--text-mute); font-size: 13px; text-align: center; padding: 44px 12px; margin: 0; }
+.footer {
+  text-align: center; color: var(--text-mute); font-size: 11px;
+  letter-spacing: 0.6px; padding: 18px 0 6px; font-family: "Chakra Petch", sans-serif;
+}
+
+/* ---------- per-legend list ---------- */
+.legend-list { max-height: 360px; overflow-y: auto; margin-top: 6px; padding-right: 4px; }
+.legend-list::-webkit-scrollbar { width: 8px; }
+.legend-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 4px; }
+.legend-list::-webkit-scrollbar-track { background: transparent; }
+.legend-head, .legend-row { display: grid; grid-template-columns: 108px 1fr 1fr; gap: 14px; align-items: center; }
+.legend-head {
+  padding: 4px 8px; font-family: "Chakra Petch", sans-serif;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--text-mute);
+  position: sticky; top: 0; background: var(--card); z-index: 1;
+}
+.legend-row { padding: 8px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); transition: background 0.15s; }
+.legend-row:hover { background: rgba(255, 255, 255, 0.02); }
+.legend-name { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.legend-row.is-empty .legend-name { color: var(--text-mute); font-weight: 400; }
+.legend-metric { display: flex; align-items: center; gap: 8px; }
+.bar-track { flex: 1; height: 8px; min-width: 24px; background: rgba(255, 255, 255, 0.05); border-radius: 2px; overflow: hidden; }
+.bar { height: 100%; border-radius: 2px; transition: width 0.5s cubic-bezier(0.2, 0.7, 0.3, 1); }
+.bar-kills { background: linear-gradient(90deg, var(--accent-deep), var(--accent)); box-shadow: 0 0 8px var(--accent-soft); }
+.bar-damage { background: linear-gradient(90deg, #d98c2f, var(--amber)); box-shadow: 0 0 8px var(--amber-soft); }
+.metric-val { font-family: "Chakra Petch", sans-serif; font-weight: 600; font-size: 12px; color: var(--text-dim); min-width: 46px; text-align: right; }
+.legend-row.is-empty .metric-val { color: var(--text-mute); }
+
+/* ---------- featured (main) legend ---------- */
+.featured-legend {
+  position: relative;
+  margin: 6px 0 16px;
+  padding: 18px 22px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(255, 59, 59, 0.16), rgba(255, 180, 84, 0.07));
+}
+.featured-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.featured-name {
+  font: 700 28px "Chakra Petch", sans-serif;
+  letter-spacing: 2px; text-transform: uppercase; line-height: 1;
+  text-shadow: 0 0 18px rgba(255, 59, 59, 0.4);
+}
+.featured-tag {
+  font: 700 10px "Chakra Petch", sans-serif; letter-spacing: 1.8px;
+  padding: 4px 9px; background: var(--accent); color: #fff; border-radius: 2px;
+}
+.featured-stats { display: flex; gap: 40px; margin-bottom: 14px; }
+.featured-stat { display: flex; flex-direction: column; gap: 3px; }
+.fs-num { font: 700 30px "Chakra Petch", sans-serif; color: var(--text); line-height: 1; }
+.fs-label { font: 600 11px "Chakra Petch", sans-serif; letter-spacing: 1.6px; color: var(--text-mute); text-transform: uppercase; }
+.featured-pcts { display: flex; flex-wrap: wrap; gap: 8px; }
+.pct-chip {
+  font: 600 12px "Chakra Petch", sans-serif; letter-spacing: 0.4px;
+  padding: 5px 11px; border: 1px solid var(--amber); color: var(--amber);
+  border-radius: 2px; background: rgba(255, 180, 84, 0.08);
+}
+
+/* main-legend row highlight in the per-legend list */
+.legend-row.is-main {
+  background: rgba(255, 59, 59, 0.07);
+  border-left: 2px solid var(--accent);
+  padding-left: 6px;
+}
+.legend-row.is-main .legend-name { color: var(--accent); }
+
+/* ---------- 今日各传奇 ---------- */
+.activity-list { margin-top: 6px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.activity-list::-webkit-scrollbar { width: 8px; }
+.activity-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 4px; }
+.activity-row {
+  display: grid; grid-template-columns: 110px 1fr 70px; gap: 14px; align-items: center;
+  padding: 9px 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.activity-name { font: 600 13px "Chakra Petch", sans-serif; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-metric { display: flex; align-items: center; gap: 8px; }
+.activity-kills { font: 700 14px "Chakra Petch", sans-serif; color: var(--accent); text-align: right; }
+
+/* ---------- 每日记录表 ---------- */
+.records-wrap { overflow-x: auto; margin-top: 6px; }
+.records-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 540px; }
+.records-table th, .records-table td { padding: 8px 10px; text-align: center; border-bottom: 1px solid rgba(255, 255, 255, 0.05); white-space: nowrap; }
+.records-table th { font: 600 11px "Chakra Petch", sans-serif; letter-spacing: 0.8px; color: var(--text-mute); text-transform: uppercase; position: sticky; top: 0; background: var(--card); }
+.records-table td { color: var(--text-dim); }
+.records-table td.rec-name { text-align: left; font: 600 13px "Chakra Petch", sans-serif; color: var(--text); }
+.rec-k { display: block; color: var(--accent); font-weight: 700; font-family: "Chakra Petch", sans-serif; }
+.rec-d { display: block; color: var(--text-dim); font-size: 11px; }
+.rec-na { color: var(--text-mute); }
+.rank-progress-badge {
+  height: 44px; object-fit: contain;
+  border-radius: 50%; padding: 4px; box-sizing: border-box;
+  animation: rankGlow 2.6s ease-in-out infinite;
+}
+
+/* 昨日兜底标注 */
+.today-report.is-yesterday .today-cell { border-left-color: var(--amber); }
+.today-report.is-yesterday .today-cell::before { background: var(--amber); }
+.today-report.is-yesterday .today-val { color: var(--amber) !important; }
+
+/* ---------- 今日战报 ---------- */
+.today-report {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px;
+  animation: riseIn 0.5s both;
+}
+.today-cell {
+  position: relative; padding: 16px 18px;
+  background: linear-gradient(150deg, var(--card), var(--bg-elev));
+  border: 1px solid var(--border);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+.today-cell::before { content: ""; position: absolute; top: 0; left: 0; width: 3px; height: 100%; background: var(--accent); }
+.today-rp::before { background: var(--amber); }
+.today-label { font: 600 11px "Chakra Petch", sans-serif; letter-spacing: 1.4px; text-transform: uppercase; color: var(--text-mute); margin-bottom: 8px; }
+.today-val { font: 700 30px "Chakra Petch", sans-serif; line-height: 1; }
+.today-val.is-up { color: #4ade80; }
+.today-val.is-down { color: var(--accent); }
+.today-val.is-flat { color: var(--text-dim); }
+
+/* ---------- 主打传奇立绘 + 流动灯带 ---------- */
+@property --fl-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.featured-legend { overflow: hidden; }
+.featured-art {
+  position: absolute; inset: 0; z-index: 0;
+  background-size: cover; background-position: center 22%;
+  opacity: 0.62; filter: saturate(1.15) contrast(1.05);
+}
+.featured-legend::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(90deg, rgba(8, 9, 13, 0.94) 0%, rgba(8, 9, 13, 0.78) 42%, rgba(8, 9, 13, 0.3) 100%);
+}
+.featured-legend::before {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  border-radius: 10px; padding: 2px;
+  background: conic-gradient(from var(--fl-angle), #ff3b3b, #ffb454, #ffd23b, #4ade80, #4aa3ff, #b14dff, #ff3b3b);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: flSpin 5s linear infinite;
+}
+@keyframes flSpin { to { --fl-angle: 360deg; } }
+.featured-overlay { position: relative; z-index: 2; }
+
+/* ---------- 账户名字体特效（流动渐变） ---------- */
+.banner-name {
+  font-size: 34px;
+  background: linear-gradient(90deg, #ffffff, #ffb454, #ff3b3b, #ff8acc, #ffb454, #ffffff);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: nameFlow 6s linear infinite;
+  letter-spacing: 2px;
+}
+@keyframes nameFlow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 250% 50%; }
+}
+
+/* ---------- realtime badge + percentiles ---------- */
+.banner-sub { display: inline-flex; align-items: center; gap: 10px; margin-top: 4px; }
+.rt-badge {
+  display: inline-block; font: 600 11px "Chakra Petch", sans-serif; letter-spacing: 0.4px;
+  padding: 3px 9px; border-radius: 2px; border: 1px solid var(--border); white-space: nowrap;
+}
+.rt-badge.rt-game { color: #4ade80; border-color: rgba(74, 222, 128, 0.5); background: rgba(74, 222, 128, 0.1); }
+.rt-badge.rt-lobby { color: var(--amber); border-color: rgba(255, 180, 84, 0.5); background: rgba(255, 180, 84, 0.1); }
+.rt-badge.rt-offline { color: var(--text-mute); }
+
+.pct-list { margin-top: 6px; }
+.pct-row {
+  display: grid; grid-template-columns: 150px 1fr 72px; gap: 12px; align-items: center;
+  padding: 8px 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.pct-info { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.pct-legend { font: 600 12px "Chakra Petch", sans-serif; color: var(--amber); }
+.pct-name { font-size: 11px; color: var(--text-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pct-bar-wrap { height: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 2px; overflow: hidden; }
+.pct-bar { height: 100%; background: linear-gradient(90deg, #d98c2f, var(--amber)); border-radius: 2px; box-shadow: 0 0 8px var(--amber-soft); transition: width 0.5s ease; }
+.pct-val { font: 700 13px "Chakra Petch", sans-serif; color: var(--text); text-align: right; }
+
+/* ---------- delta indicators ---------- */
+.kpi-delta {
+  margin-top: 9px;
+  font: 600 11px "Chakra Petch", sans-serif;
+  letter-spacing: 0.4px;
+  min-height: 14px;
+}
+.kpi-delta.is-up, .banner-delta.is-up { color: #4ade80; }
+.kpi-delta.is-down, .banner-delta.is-down { color: var(--accent); }
+.kpi-delta.is-flat, .banner-delta.is-flat { color: var(--text-mute); }
+.banner-delta {
+  font: 600 12px "Chakra Petch", sans-serif;
+  letter-spacing: 0.4px;
+}
+
+/* ---------- toast ---------- */
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: var(--card-hi); border: 1px solid var(--accent);
+  color: var(--text); padding: 11px 20px; border-radius: var(--radius);
+  font: 500 13px "Chakra Petch", sans-serif; letter-spacing: 0.5px;
+  box-shadow: 0 0 24px var(--accent-soft); z-index: 50;
+  opacity: 0; transition: opacity 0.2s;
+}
+.toast.is-visible { opacity: 1; }
+
+@keyframes riseIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* ---------- responsive ---------- */
+@media (max-width: 960px) {
+  .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+  .dual-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 18px 14px 30px; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .topbar { flex-wrap: wrap; padding: 12px 16px; }
+  .last-updated { display: none; }
+  .banner { flex-direction: column; align-items: flex-start; }
+  .banner-rankwrap { align-self: flex-end; }
+  .kpi-value { font-size: 24px; }
+  .banner-name { font-size: 22px; }
+}
