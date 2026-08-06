@@ -4,8 +4,7 @@ Apex Legends 个人战绩分析仪表盘。实时获取聚合战绩、定时快�
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.141+-green) ![Docker](https://img.shields.io/badge/Docker-ready-blue) ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-<!-- 截图占位：替换为你的仪表盘截图 -->
-<!-- ![dashboard](screenshots/dashboard.png) -->
+![image-20260806195243913](assets/image-20260806195243913.png)
 
 ---
 
