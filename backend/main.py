@@ -66,6 +66,13 @@ def create_app(
             snap_cols = [row[1] for row in (await conn.execute(text("PRAGMA table_info(snapshots)"))).all()]
             if "ranked_season" not in snap_cols:
                 await conn.execute(text("ALTER TABLE snapshots ADD COLUMN ranked_season VARCHAR(32)"))
+            # PRAGMA returns no rows for a table create_all just created, and a
+            # fresh table already has these columns — both cases need no ALTER.
+            imp_cols = [row[1] for row in (await conn.execute(text("PRAGMA table_info(ea_imports)"))).all()]
+            if "weapon_count" not in imp_cols and imp_cols:
+                await conn.execute(text("ALTER TABLE ea_imports ADD COLUMN weapon_count INTEGER DEFAULT 0 NOT NULL"))
+            if "parser_version" not in imp_cols and imp_cols:
+                await conn.execute(text("ALTER TABLE ea_imports ADD COLUMN parser_version INTEGER DEFAULT 0 NOT NULL"))
 
         scheduler = None
         if start_scheduler and settings.apex_api_key:

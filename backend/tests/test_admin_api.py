@@ -26,7 +26,10 @@ TOKEN = "sekrit-admin-token"
 
 SAMPLE_BRIDGE: dict[str, Any] = {
     "global": {"name": "TestPlayer", "uid": "100", "level": 100, "rank": {}, "battlepass": {}},
-    "total": {},
+    "total": {
+        "mastery_alternator_kills": {"name": "Alternator SMG Kills", "value": 1234},
+        "mastery_r99_kills": {"name": "R-99 SMG Kills", "value": 700},
+    },
     "legends": {
         "selected": {"Octane": {"data": {}}},
         "all": {
@@ -66,6 +69,13 @@ def _export_zip() -> bytes:
                         {"name": "stats.characters[character_octane].games_played", "value": "3753"},
                         {"name": "stats.characters[character_lifeline].kills", "value": "244"},
                         {"name": "stats.characters[character_lifeline].damage_done", "value": "109858"},
+                        {"name": "stats.weapons[mp_weapon_alternator_smg].kills", "value": "1322"},
+                        {"name": "stats.weapons[mp_weapon_alternator_smg].damage_done", "value": "437133"},
+                        {"name": "stats.weapons[mp_weapon_alternator_smg].headshots", "value": "1890"},
+                        {"name": "stats.weapons[mp_weapon_alternator_smg].shots", "value": "119381"},
+                        {"name": "stats.weapons[mp_weapon_alternator_smg].hits", "value": "26251"},
+                        {"name": "stats.weapons[mp_weapon_r97].kills", "value": "653"},
+                        {"name": "stats.weapons[mp_weapon_mastiff].kills", "value": "64"},
                     ],
                     "antiCheatSessions": [
                         {"ip": "1.2.3.4", "time_start": "2026-08-30T10:00:00.000Z",
@@ -130,6 +140,7 @@ def test_upload_import_report_and_legends_overlay(tmp_path) -> None:
     body = resp.json()
     assert body["duplicate"] is False
     assert body["legend_count"] == 2
+    assert body["weapon_count"] == 3
     assert body["data_end"].startswith("2026-08-30")
 
     # re-upload the same file → duplicate, no double import
@@ -168,6 +179,24 @@ def test_upload_import_report_and_legends_overlay(tmp_path) -> None:
     legends = client.get("/api/players/1/legends").json()
     assert legends["calibration"]["Octane"]["calibrated_kills"] == 5337
     assert "Lifeline" not in legends["calibration"]
+
+    # weapon reconciliation: report + dashboard breakdown
+    weapons = {w["short_id"]: w for w in report["weapons"]}
+    assert weapons["alternator"]["missing_kills"] == 88          # 1322 − 1234
+    assert weapons["alternator"]["calibrated_kills"] == 1322
+    assert weapons["r99"]["calibrated_kills"] == 700             # tracker ahead, kept
+    assert weapons["mastiff"]["tracker_kills"] is None           # invisible to trackers
+    assert weapons["mastiff"]["calibrated_kills"] == 64
+
+    breakdown = client.get("/api/players/1/breakdown").json()
+    by_name = {w["name"]: w for w in breakdown["weapons"]}
+    assert by_name["Alternator SMG Kills"]["value"] == 1322      # topped up
+    assert by_name["Alternator SMG Kills"]["is_calibrated"] is True
+    assert by_name["Alternator SMG Kills"]["headshots"] == 1890
+    assert by_name["Mastiff"]["value"] == 64                     # newly visible
+    assert by_name["R-99 SMG Kills"]["value"] == 700
+    dmg = {w["name"]: w for w in breakdown["weapon_damage"]}
+    assert dmg["Alternator SMG Kills"]["value"] == 437133
 
     # unknown player → clean 404
     assert client.get("/api/admin/ea-report/99", headers=_auth(client)).status_code == 404

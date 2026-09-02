@@ -414,16 +414,24 @@
 
   async function loadBreakdown() {
     const b = await API.getBreakdown(state.playerId);
-    // 武器精通（账号级，各传奇共用）
+    // 武器精通：EA 校准后的官方数据（补齐追踪器看不到的武器 + 爆头/命中率）
     const wshow = b.weapons.length > 0;
     els.weaponChart.style.display = wshow ? "block" : "none";
     els.weaponEmpty.hidden = wshow;
-    if (wshow) Charts.weaponBar("weapon-chart", b.weapons.map((w) => ({ name: trackerCn(w.name), value: w.value })));
+    if (wshow) Charts.weaponBar("weapon-chart", b.weapons.map((w) => ({
+      name: trackerCn(w.name), value: w.value,
+      headshots: w.headshots, shots: w.shots, hits: w.hits,
+      calibrated: w.is_calibrated,
+    })));
     // 武器伤害
     const wdshow = (b.weapon_damage || []).length > 0;
     els.weaponDamageChart.style.display = wdshow ? "block" : "none";
     els.weaponDamageEmpty.hidden = wdshow;
-    if (wdshow) Charts.weaponBar("weapon-damage-chart", b.weapon_damage.map((w) => ({ name: trackerCnDamage(w.name), value: w.value })));
+    if (wdshow) Charts.weaponBar("weapon-damage-chart", b.weapon_damage.map((w) => ({
+      name: trackerCnDamage(w.name), value: w.value,
+      headshots: w.headshots, shots: w.shots, hits: w.hits,
+      calibrated: w.is_calibrated,
+    })));
     // 主打传奇按校准后的击杀重新排序（陈旧追踪器会低估场次多的传奇）
     const cal = state.calibration || {};
     const ranked = [...(b.legends || [])].map((l) => {

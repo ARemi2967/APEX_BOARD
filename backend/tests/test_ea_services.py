@@ -19,11 +19,12 @@ import pytest
 from sqlalchemy import select
 
 from backend.db.base import Base
-from backend.db.models import EaLegendStat, EaMatch, EaImport, Player, Snapshot
+from backend.db.models import EaLegendStat, EaWeaponStat, EaMatch, EaImport, Player, Snapshot
 from backend.db.session import make_engine, make_session_factory
 from backend.services.calibration_service import (
     calibration_overlay,
     compute_calibration,
+    compute_weapon_calibration,
 )
 from backend.services.ea_export_service import (
     EaExportError,
@@ -87,6 +88,16 @@ OCTANE_ROWS = [
     {"name": "stats.characters[character_octane].kills_max_single_game", "value": "19"},
     {"name": "stats.seasons[unknown].characters[character_octane].kills", "value": "300"},
     {"name": "stats.kills", "value": "572"},
+    # weapons (mp_weapon_shotgun_pistol is the MOZAMBIQUE, not the Mastiff)
+    {"name": "stats.weapons[mp_weapon_alternator_smg].kills", "value": "1322"},
+    {"name": "stats.weapons[mp_weapon_alternator_smg].damage_done", "value": "437133"},
+    {"name": "stats.weapons[mp_weapon_alternator_smg].headshots", "value": "1890"},
+    {"name": "stats.weapons[mp_weapon_alternator_smg].shots", "value": "119381"},
+    {"name": "stats.weapons[mp_weapon_alternator_smg].hits", "value": "26251"},
+    {"name": "stats.weapons[mp_weapon_r97].kills", "value": "653"},
+    {"name": "stats.weapons[mp_weapon_shotgun_pistol].kills", "value": "397"},
+    {"name": "stats.weapons[mp_weapon_mastiff].kills", "value": "64"},
+    {"name": "stats.weapons[unknown].kills", "value": "2"},  # unmapped EA id
 ]
 
 SESSIONS = [
@@ -143,6 +154,13 @@ def test_parse_real_format_export() -> None:
     assert len(payload.legend_stats) == 3  # decoy keys excluded
     assert payload.matches == []
 
+    weapons = {s.raw_key: s for s in payload.weapon_stats}
+    assert weapons["mp_weapon_alternator_smg"].kills == 1322
+    assert weapons["mp_weapon_alternator_smg"].headshots == 1890
+    assert weapons["mp_weapon_shotgun_pistol"].display == ("mozambique", "Mozambique")
+    assert weapons["mp_weapon_r97"].display == ("r99", "R-99")
+    assert len(payload.weapon_stats) == 5  # decoys + unmapped "unknown" kept raw
+
     assert payload.as_of == datetime(2026, 8, 31)          # from `date`
     assert payload.session_start == datetime(2025, 9, 5, 10)
     assert payload.session_end == datetime(2026, 8, 31, 11, 23, 36, 269000)
@@ -191,6 +209,7 @@ async def test_import_is_idempotent_by_hash(tmp_path) -> None:
     first = await import_ea_export(sf, player.id, "export.zip", data)
     assert first["duplicate"] is False
     assert first["legend_count"] == 3
+    assert first["weapon_count"] == 5
     assert first["match_count"] == 0
     assert first["data_start"] == datetime(2025, 9, 5, 10)
 
@@ -200,6 +219,7 @@ async def test_import_is_idempotent_by_hash(tmp_path) -> None:
 
     async with sf() as session:
         assert len((await session.execute(select(EaLegendStat))).scalars().all()) == 3
+        assert len((await session.execute(select(EaWeaponStat))).scalars().all()) == 5
         assert len((await session.execute(select(EaImport))).scalars().all()) == 1
     await engine.dispose()
 
@@ -212,6 +232,34 @@ async def test_overlapping_import_upserts_not_duplicates(tmp_path) -> None:
     async with sf() as session:
         keys = sorted(m.match_key for m in (await session.execute(select(EaMatch))).scalars().all())
     assert keys == ["s1", "s2"]  # union, no double-count
+    await engine.dispose()
+
+
+async def test_parser_upgrade_reimports_same_file_in_place(tmp_path, monkeypatch) -> None:
+    """file_hash is UNIQUE: a parser-version bump must refresh the existing
+    import row (fresh extraction) instead of colliding on a second row."""
+    import backend.services.ea_export_service as svc
+
+    engine, sf, player = await _make_db(tmp_path, "ea3.db")
+    data = _real_format_export(OCTANE_ROWS, SESSIONS)
+    await import_ea_export(sf, player.id, "export.zip", data)
+
+    monkeypatch.setattr(svc, "PARSER_VERSION", 99)  # simulate a parser upgrade
+    result = await import_ea_export(sf, player.id, "export.zip", data)
+    assert result["duplicate"] is False
+    assert result["import_id"] == 1  # refreshed in place, still one row
+
+    async with sf() as session:
+        imports = (await session.execute(select(EaImport))).scalars().all()
+        assert len(imports) == 1
+        assert imports[0].parser_version == 99
+        # extraction refreshed, not duplicated
+        assert len((await session.execute(select(EaLegendStat))).scalars().all()) == 3
+        assert len((await session.execute(select(EaWeaponStat))).scalars().all()) == 5
+
+    # same version again → duplicate again
+    result2 = await import_ea_export(sf, player.id, "export.zip", data)
+    assert result2["duplicate"] is True
     await engine.dispose()
 
 
@@ -326,4 +374,66 @@ async def test_calibration_empty_without_import(tmp_path) -> None:
     report = await compute_calibration(sf, player.id, use_cache=False)
     assert report.legends == []
     assert calibration_overlay(report) == {}
+    await engine.dispose()
+
+
+async def test_weapon_calibration_scenarios(tmp_path) -> None:
+    """Alternator stale (tracker behind EA), R-99 tracker ahead (post-export
+    matches), Mastiff invisible to trackers entirely."""
+    engine = make_engine(str(tmp_path / "wcal.db"))
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    sf = make_session_factory(engine)
+    async with sf() as session:
+        player = Player(uid="100", platform="PC")
+        session.add(player)
+        await session.flush()
+        session.add(Snapshot(player_id=player.id, captured_at=datetime(2026, 8, 10), raw_json=json.dumps({
+            "legends": {"all": {}},
+            "total": {
+                "mastery_alternator_kills": {"name": "Alternator SMG Kills", "value": 1234},
+                "mastery_r99_kills": {"name": "R-99 SMG Kills", "value": 700},
+            },
+        })))
+        imp = EaImport(player_id=player.id, file_name="x.zip", file_hash="h1",
+                       match_count=0, legend_count=0, weapon_count=2, parser_version=2)
+        session.add(imp)
+        await session.flush()
+        for raw, k, d, hs, shots, hits in [
+            ("mp_weapon_alternator_smg", 1322, 437133, 1890, 119381, 26251),
+            ("mp_weapon_r97", 653, 239236, 1896, 98340, 19659),
+            ("mp_weapon_mastiff", 64, 21435, 77, 1019, 1402),
+            ("mp_weapon_unknownxx", 2, 100, None, None, None),  # unmapped → dropped
+        ]:
+            session.add(EaWeaponStat(import_id=imp.id, player_id=player.id, weapon=raw,
+                                     kills=k, damage=d, headshots=hs, shots=shots,
+                                     hits=hits, as_of=datetime(2026, 8, 31)))
+        await session.commit()
+        await session.refresh(player)
+
+    report = await compute_weapon_calibration(sf, player.id, use_cache=False)
+    by = {w.short_id: w for w in report.weapons}
+
+    stale = by["alternator"]
+    assert stale.tracker_kills == 1234 and stale.ea_kills == 1322
+    assert stale.missing_kills == 88
+    assert stale.calibrated_kills == 1322
+    assert stale.headshots == 1890 and stale.shots == 119381
+    assert stale.weapon == "Alternator SMG Kills"  # tracker display name kept
+    assert stale.is_calibrated
+
+    ahead = by["r99"]  # tracker kills moved past the EA baseline after export date
+    assert ahead.missing_kills == 0
+    assert ahead.calibrated_kills == 700
+    assert ahead.calibrated_damage == 239236  # damage tracker absent → EA fills it
+    assert ahead.is_calibrated  # via the damage dimension
+
+    invisible = by["mastiff"]  # trackers never exposed this weapon
+    assert invisible.tracker_kills is None
+    assert invisible.calibrated_kills == 64
+    assert invisible.missing_kills == 64
+    assert invisible.weapon == "Mastiff"  # canonical name (WEAPON_CN key)
+
+    assert "unknownxx" not in by  # unmapped EA id dropped
+    assert report.weapons[0].short_id == "alternator"  # kills desc
     await engine.dispose()

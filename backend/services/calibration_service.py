@@ -1,12 +1,14 @@
-"""Legend-stat calibration: reconcile EA export ground truth vs stale trackers.
+"""Legend & weapon stat calibration: reconcile EA export ground truth vs
+stale trackers.
 
 Why: the bridge API's per-legend kills/damage are the currently-equipped
-trackers' readings. For rarely-played legends those readings lag (sometimes by
-months), so the site undercounts. The EA export's ``gameDataTable`` carries
-the OFFICIAL per-legend lifetime career counters — the very numbers the
-in-game trackers read — so reconciliation is a direct comparison:
+trackers' readings, and its weapon mastery (`mastery_<weapon>_*`) only exposes
+a flaky subset of weapons. For rarely-played legends those readings lag
+(sometimes by months), so the site undercounts. The EA export's
+``gameDataTable`` carries the OFFICIAL lifetime career counters — the very
+numbers the in-game trackers read — so reconciliation is a direct comparison:
 
-    missing    = max(0, EA官方值 − 追踪器值)     per legend, per metric
+    missing    = max(0, EA官方值 − 追踪器值)     per legend/weapon, per metric
     calibrated = max(追踪器值, EA官方值)
 
 A healthy tracker matches EA exactly (missing = 0 — verified on real data);
@@ -17,6 +19,8 @@ tracker back. Re-importing a newer export refreshes the EA baseline.
 
 EA anonymizes some character ids (``unknown``); those counters can't be
 attributed to a legend and are surfaced separately as ``unattributed``.
+Weapon mastery trackers only ever show some weapons — EA-only weapons simply
+appear as new rows (the big win: Mastiff/Flatline/etc. the site never saw).
 
 Results are computed on read (never stored), cached against the latest
 snapshot/import ids so per-request cost stays low.
@@ -26,14 +30,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.db.models import EaLegendStat, Snapshot
-from backend.services.ea_export_service import ea_character_to_bridge, latest_import_id
+from backend.db.models import EaLegendStat, EaWeaponStat, Snapshot
+from backend.services.ea_export_service import (
+    ea_character_to_bridge,
+    ea_weapon_display,
+    latest_import_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -210,3 +219,161 @@ def calibration_overlay(report: CalibrationReport | None) -> dict[str, dict[str,
             "missing_damage": row.missing_damage,
         }
     return out
+
+
+# --- weapon calibration --------------------------------------------------------
+#
+# Same direct-comparison idea, joined on the mastery tracker short id
+# (`mastery_<short>_kills`). EA-only weapons (the site's trackers never expose
+# them) appear as new rows; headshots/shots/hits ride along for accuracy.
+
+# how many recent snapshots to scan for the (flaky) mastery values
+_MASTERY_SNAPSHOT_SCAN = 20
+
+
+def _short_id_display_map() -> dict[str, str]:
+    from backend.services.ea_export_service import WEAPON_ID_MAP
+
+    return {short: display for short, display in WEAPON_ID_MAP.values()}
+
+
+_SHORT_ID_TO_DISPLAY: dict[str, str] = _short_id_display_map()
+
+
+@dataclass
+class WeaponCalibration:
+    weapon: str                      # canonical display name (WEAPON_CN key)
+    short_id: str                    # mastery tracker join id
+    tracker_kills: int | None = None
+    tracker_damage: int | None = None
+    ea_kills: int | None = None
+    ea_damage: int | None = None
+    headshots: int | None = None
+    shots: int | None = None
+    hits: int | None = None
+    missing_kills: int = 0
+    missing_damage: int = 0
+    calibrated_kills: int | None = None
+    calibrated_damage: int | None = None
+
+    @property
+    def is_calibrated(self) -> bool:
+        return self.missing_kills > 0 or self.missing_damage > 0
+
+
+@dataclass
+class WeaponCalibrationReport:
+    player_id: int
+    ea_as_of: datetime | None = None
+    weapons: list[WeaponCalibration] = field(default_factory=list)
+
+
+def _merge_tracker_mastery(raw_jsons: list[str]) -> dict[str, dict]:
+    """Max (monotonic) mastery value per weapon short id across snapshots,
+    split by metric — same strategy as the breakdown endpoint's merge. Keeps
+    the tracker's display name (e.g. "Alternator SMG Kills") for continuity."""
+    merged: dict[str, dict] = {}
+    for raw in raw_jsons:
+        try:
+            total = (json.loads(raw).get("total") or {})
+        except json.JSONDecodeError:
+            continue
+        for key, entry in total.items():
+            if not isinstance(entry, dict) or not key.startswith("mastery_"):
+                continue
+            if key.endswith("_kills"):
+                short, metric = key[len("mastery_"):-len("_kills")], "k"
+            elif key.endswith("_damage_done"):
+                short, metric = key[len("mastery_"):-len("_damage_done")], "d"
+            else:
+                continue
+            value = entry.get("value")
+            if not isinstance(value, int) or value <= 0:
+                continue
+            slot = merged.setdefault(short, {"k": 0, "d": 0, "name": None})
+            if value > slot[metric]:
+                slot[metric] = value
+            if slot["name"] is None and isinstance(entry.get("name"), str):
+                slot["name"] = entry["name"]
+    return merged
+
+
+_weapon_cache: dict[tuple, tuple[int | None, int | None, WeaponCalibrationReport]] = {}
+
+
+async def compute_weapon_calibration(
+    session_factory: async_sessionmaker, player_id: int, use_cache: bool = True
+) -> WeaponCalibrationReport:
+    """Weapon reconciliation rows (tracker-only + EA-only + both), kills desc."""
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(Snapshot.id, Snapshot.raw_json)
+                .where(Snapshot.player_id == player_id)
+                .order_by(Snapshot.captured_at.desc())
+                .limit(_MASTERY_SNAPSHOT_SCAN)
+            )
+        ).all()
+    latest_snap_id = rows[0].id if rows else None
+    raw_jsons = [r.raw_json for r in rows]
+
+    last_import = await latest_import_id(session_factory, player_id)
+    key = _cache_key(session_factory, player_id)
+    if use_cache:
+        cached = _weapon_cache.get(key)
+        if cached is not None and cached[0] == latest_snap_id and cached[1] == last_import:
+            return cached[2]
+
+    report = WeaponCalibrationReport(player_id=player_id)
+    tracker = _merge_tracker_mastery(raw_jsons) if raw_jsons else {}
+
+    ea_by_short: dict[str, EaWeaponStat] = {}
+    if last_import is not None:
+        async with session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(EaWeaponStat).where(EaWeaponStat.import_id == last_import)
+                )
+            ).scalars().all()
+        for row in rows:
+            display = ea_weapon_display(row.weapon)
+            if display is None:
+                continue  # unmapped EA weapon id — can't attribute yet
+            short_id, _name = display
+            if short_id not in ea_by_short:  # first row per weapon wins
+                ea_by_short[short_id] = row
+            if report.ea_as_of is None:
+                report.ea_as_of = row.as_of
+
+    by_short: dict[str, WeaponCalibration] = {}
+    for short_id, values in tracker.items():
+        # tracker-known weapons keep their upstream display name; canonical
+        # names are only used for weapons the site has never seen
+        display = values.get("name") or _SHORT_ID_TO_DISPLAY.get(short_id, short_id)
+        by_short[short_id] = WeaponCalibration(
+            weapon=display, short_id=short_id,
+            tracker_kills=values["k"] or None,
+            tracker_damage=values["d"] or None,
+        )
+    for short_id, row in ea_by_short.items():
+        entry = by_short.get(short_id)
+        if entry is None:
+            entry = by_short[short_id] = WeaponCalibration(
+                weapon=_SHORT_ID_TO_DISPLAY.get(short_id, short_id), short_id=short_id
+            )
+        entry.ea_kills, entry.ea_damage = row.kills, row.damage
+        entry.headshots, entry.shots, entry.hits = row.headshots, row.shots, row.hits
+
+    for entry in by_short.values():
+        tk, td = entry.tracker_kills, entry.tracker_damage
+        ek, ed = entry.ea_kills, entry.ea_damage
+        entry.missing_kills = max(0, (ek or 0) - (tk or 0)) if ek is not None else 0
+        entry.missing_damage = max(0, (ed or 0) - (td or 0)) if ed is not None else 0
+        entry.calibrated_kills = max(tk or 0, ek or 0) if (tk is not None or ek is not None) else None
+        entry.calibrated_damage = max(td or 0, ed or 0) if (td is not None or ed is not None) else None
+
+    report.weapons = sorted(
+        by_short.values(), key=lambda r: (r.calibrated_kills or 0), reverse=True
+    )
+    _weapon_cache[key] = (latest_snap_id, last_import, report)
+    return report

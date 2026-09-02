@@ -126,6 +126,11 @@ class TrackerPercentile(BaseModel):
 class WeaponStat(BaseModel):
     name: str
     value: int
+    # EA-export extras (weapon calibration); absent on tracker-only weapons.
+    headshots: int | None = None
+    shots: int | None = None
+    hits: int | None = None
+    is_calibrated: bool = False  # value differs from the raw tracker reading
 
 
 class LegendActivity(BaseModel):
@@ -187,6 +192,7 @@ class EaImportOut(BaseModel):
     data_end: datetime | None = None
     match_count: int
     legend_count: int = 0
+    weapon_count: int = 0
     ingested_at: datetime
 
 
@@ -198,6 +204,7 @@ class EaImportResult(BaseModel):
     file_name: str
     match_count: int
     legend_count: int = 0
+    weapon_count: int = 0
     data_start: datetime | None = None
     data_end: datetime | None = None
 
@@ -220,6 +227,26 @@ class LegendCalibrationOut(BaseModel):
     is_calibrated: bool = False
 
 
+class WeaponCalibrationOut(BaseModel):
+    """Per-weapon reconciliation row: EA official career counters vs the
+    site's flaky mastery trackers."""
+
+    weapon: str
+    short_id: str
+    tracker_kills: int | None = None
+    tracker_damage: int | None = None
+    ea_kills: int | None = None
+    ea_damage: int | None = None
+    headshots: int | None = None
+    shots: int | None = None
+    hits: int | None = None
+    missing_kills: int = 0
+    missing_damage: int = 0
+    calibrated_kills: int | None = None
+    calibrated_damage: int | None = None
+    is_calibrated: bool = False
+
+
 class CalibrationOut(BaseModel):
     player_id: int
     ea_as_of: datetime | None = None
@@ -228,3 +255,4 @@ class CalibrationOut(BaseModel):
     unattributed_kills: int = 0
     unattributed_damage: int = 0
     legends: list[LegendCalibrationOut] = []
+    weapons: list[WeaponCalibrationOut] = []

@@ -48,17 +48,22 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.db.models import EaImport, EaLegendStat, EaMatch
+from backend.db.models import EaImport, EaLegendStat, EaMatch, EaWeaponStat
 
 logger = logging.getLogger(__name__)
 
 
 class EaExportError(Exception):
     """The uploaded file is not a parseable EA data export."""
+
+
+# Bump when the parser learns to extract new things from the same bytes —
+# re-uploads of already-imported files then re-extract instead of no-op'ing.
+PARSER_VERSION = 2
 
 
 # Canonical bridge-API legend names (must match the keys the snapshots' raw
@@ -118,6 +123,53 @@ _NESTED_STATS_KEYS = ("stats", "matchStats", "performance", "values", "attribute
 _LEGEND_STAT_RE = re.compile(
     r"^stats\.characters\[([^\]]+)\]\.(kills|damage_done|games_played)$"
 )
+_WEAPON_STAT_RE = re.compile(
+    r"^stats\.weapons\[([^\]]+)\]\.(kills|damage_done|headshots|shots|hits)$"
+)
+
+# EA weapon ids -> (bridge tracker short id, display name). Short ids match the
+# mastery_<id>_kills tracker keys (verified against live snapshot data);
+# display names align with the frontend's WEAPON_CN translation keys.
+# Cross-validated quirk: mp_weapon_shotgun_pistol is the MOZAMBIQUE (the
+# "shotgun pistol"), NOT the Mastiff — mp_weapon_mastiff is.
+WEAPON_ID_MAP: dict[str, tuple[str, str]] = {
+    "mp_weapon_alternator_smg": ("alternator", "Alternator"),
+    "mp_weapon_r97": ("r99", "R-99"),
+    "mp_weapon_rspn101": ("r301", "R-301"),
+    "mp_weapon_semipistol": ("p2020", "P2020"),
+    "mp_weapon_autopistol": ("re45", "RE-45"),
+    "mp_weapon_nemesis": ("nemesis", "Nemesis"),
+    "mp_weapon_hemlok": ("hemlok", "Hemlok"),
+    "mp_weapon_vinson": ("flatline", "Flatline"),
+    "mp_weapon_car": ("car", "C.A.R"),
+    "mp_weapon_volt_smg": ("volt", "Volt"),
+    "mp_weapon_pdw": ("prowler", "Prowler"),
+    "mp_weapon_lmg": ("spitfire", "Spitfire"),
+    "mp_weapon_dragon_lmg": ("rampage", "Rampage"),
+    "mp_weapon_energy_ar": ("havoc", "Havoc"),
+    "mp_weapon_esaw": ("devotion", "Devotion"),
+    "mp_weapon_lstar": ("lstar", "L-STAR"),
+    "mp_weapon_shotgun": ("eva8", "EVA-8"),
+    "mp_weapon_shotgun_pistol": ("mozambique", "Mozambique"),
+    "mp_weapon_mastiff": ("mastiff", "Mastiff"),
+    "mp_weapon_energy_shotgun": ("peacekeeper", "Peacekeeper"),
+    "mp_weapon_dragon_sniper": ("kraber", "Kraber"),
+    "mp_weapon_sniper": ("kraber", "Kraber"),
+    "mp_weapon_dmr": ("longbow", "Longbow"),
+    "mp_weapon_g2": ("g7", "G7"),
+    "mp_weapon_defender": ("chargerifle", "Charge Rifle"),
+    "mp_weapon_doubletake": ("tripletake", "Triple Take"),
+    "mp_weapon_3030": ("3030", "30-30"),
+    "mp_weapon_sentinel": ("sentinel", "Sentinel"),
+    "mp_weapon_wingman": ("wingman", "Wingman"),
+    "mp_weapon_bow": ("bocek", "Bocek"),
+}
+
+
+def ea_weapon_display(raw_key: str) -> tuple[str, str] | None:
+    """EA weapon id -> (tracker short id, display name); unmapped → None."""
+    entry = WEAPON_ID_MAP.get((raw_key or "").strip())
+    return entry if entry else None
 
 
 def _pick(entry: dict, keys: tuple[str, ...]) -> Any:
@@ -254,9 +306,26 @@ class LegendStats:
 
 
 @dataclass
+class WeaponStats:
+    """Official per-weapon lifetime career stats from one export."""
+
+    raw_key: str                      # EA id verbatim, e.g. "mp_weapon_r97"
+    kills: int | None = None
+    damage: int | None = None
+    headshots: int | None = None
+    shots: int | None = None
+    hits: int | None = None
+
+    @property
+    def display(self) -> tuple[str, str] | None:
+        return ea_weapon_display(self.raw_key)
+
+
+@dataclass
 class ExportPayload:
     matches: list[ParsedMatch] = field(default_factory=list)
     legend_stats: list[LegendStats] = field(default_factory=list)
+    weapon_stats: list[WeaponStats] = field(default_factory=list)
     as_of: datetime | None = None          # export generation date
     session_start: datetime | None = None  # earliest anti-cheat session (data coverage)
     session_end: datetime | None = None
@@ -306,6 +375,27 @@ def parse_legend_stats_rows(table_rows: list) -> dict[str, LegendStats]:
     return out
 
 
+def parse_weapon_stats_rows(table_rows: list) -> dict[str, WeaponStats]:
+    """Extract per-weapon lifetime stats from a gameDataTable's {name, value}
+    rows. Returns EA-id → WeaponStats."""
+    field_for = {"kills": "kills", "damage_done": "damage", "headshots": "headshots",
+                 "shots": "shots", "hits": "hits"}
+    out: dict[str, WeaponStats] = {}
+    for row in table_rows or []:
+        if not isinstance(row, dict):
+            continue
+        m = _WEAPON_STAT_RE.match(str(row.get("name") or ""))
+        if m is None:
+            continue
+        weapon_key, stat = m.group(1), m.group(2)
+        value = _as_int(row.get("value"))
+        if value is None:
+            continue
+        entry = out.setdefault(weapon_key, WeaponStats(raw_key=weapon_key))
+        setattr(entry, field_for[stat], value)
+    return out
+
+
 def parse_export_zip(data: bytes) -> ExportPayload:
     """Extract everything useful from the export zip.
 
@@ -320,6 +410,7 @@ def parse_export_zip(data: bytes) -> ExportPayload:
     names = [n for n in zf.namelist() if not n.endswith("/")]
     payload = ExportPayload()
     seen_legend_keys: set[str] = set()
+    seen_weapon_keys: set[str] = set()
 
     for name in names:
         if not name.lower().endswith(".json"):
@@ -333,12 +424,15 @@ def parse_export_zip(data: bytes) -> ExportPayload:
 
         apex_tables = list(_iter_game_data_tables(doc))
         for user_data in apex_tables:
-            for raw_key, stats in parse_legend_stats_rows(
-                user_data.get("gameDataTable")
-            ).items():
+            table_rows = user_data.get("gameDataTable")
+            for raw_key, stats in parse_legend_stats_rows(table_rows).items():
                 if raw_key not in seen_legend_keys:
                     seen_legend_keys.add(raw_key)
                     payload.legend_stats.append(stats)
+            for raw_key, stats in parse_weapon_stats_rows(table_rows).items():
+                if raw_key not in seen_weapon_keys:
+                    seen_weapon_keys.add(raw_key)
+                    payload.weapon_stats.append(stats)
             sessions = user_data.get("antiCheatSessions") or []
             times = [
                 t for t in (
@@ -373,7 +467,7 @@ def parse_export_zip(data: bytes) -> ExportPayload:
         if len(payload.matches) > before and name not in payload.used_files:
             payload.used_files.append(name)
 
-    if not payload.legend_stats and not payload.matches:
+    if not payload.legend_stats and not payload.weapon_stats and not payload.matches:
         detail = f"zip contains {len(names)} files, json files: " + ", ".join(
             n for n in names if n.lower().endswith(".json")
         )[:200]
@@ -407,13 +501,17 @@ async def import_ea_export(
         existing = (
             await session.execute(select(EaImport).where(EaImport.file_hash == file_hash))
         ).scalar_one_or_none()
-    if existing is not None:
+    # Same bytes + same parser version → true duplicate. A parser upgrade
+    # re-extracts the file as a fresh import (stat tables live per-import, so
+    # nothing doubles up).
+    if existing is not None and existing.parser_version == PARSER_VERSION:
         return {
             "duplicate": True,
             "import_id": existing.id,
             "file_name": existing.file_name,
             "match_count": existing.match_count,
             "legend_count": existing.legend_count,
+            "weapon_count": existing.weapon_count,
             "data_start": existing.data_start,
             "data_end": existing.data_end,
         }
@@ -450,16 +548,37 @@ async def import_ea_export(
             )
             await session.execute(stmt)
 
-        imp = EaImport(
-            player_id=player_id,
-            file_name=file_name[:255],
-            file_hash=file_hash,
-            data_start=payload.session_start,
-            data_end=payload.session_end,
-            match_count=len(match_rows),
-            legend_count=len(payload.legend_stats),
-        )
-        session.add(imp)
+        if existing is not None:
+            # Same file re-imported under a NEW parser version: refresh the
+            # existing row in place (file_hash is UNIQUE — one row per file).
+            imp = await session.get(EaImport, existing.id)
+            assert imp is not None
+            await session.execute(
+                delete(EaLegendStat).where(EaLegendStat.import_id == imp.id)
+            )
+            await session.execute(
+                delete(EaWeaponStat).where(EaWeaponStat.import_id == imp.id)
+            )
+            imp.file_name = file_name[:255]
+            imp.data_start = payload.session_start
+            imp.data_end = payload.session_end
+            imp.match_count = len(match_rows)
+            imp.legend_count = len(payload.legend_stats)
+            imp.weapon_count = len(payload.weapon_stats)
+            imp.parser_version = PARSER_VERSION
+        else:
+            imp = EaImport(
+                player_id=player_id,
+                file_name=file_name[:255],
+                file_hash=file_hash,
+                data_start=payload.session_start,
+                data_end=payload.session_end,
+                match_count=len(match_rows),
+                legend_count=len(payload.legend_stats),
+                weapon_count=len(payload.weapon_stats),
+                parser_version=PARSER_VERSION,
+            )
+            session.add(imp)
         await session.flush()  # need imp.id for the stat rows
 
         if payload.legend_stats:
@@ -475,12 +594,27 @@ async def import_ea_export(
                 )
                 for s in payload.legend_stats
             ])
+        if payload.weapon_stats:
+            session.add_all([
+                EaWeaponStat(
+                    import_id=imp.id,
+                    player_id=player_id,
+                    weapon=s.raw_key[:64],
+                    kills=s.kills,
+                    damage=s.damage,
+                    headshots=s.headshots,
+                    shots=s.shots,
+                    hits=s.hits,
+                    as_of=payload.as_of,
+                )
+                for s in payload.weapon_stats
+            ])
         await session.commit()
         await session.refresh(imp)
 
     logger.info(
-        "EA export imported player_id=%s file=%s legends=%d matches=%d as_of=%s sessions=%s..%s",
-        player_id, file_name, imp.legend_count, imp.match_count,
+        "EA export imported player_id=%s file=%s legends=%d weapons=%d matches=%d as_of=%s sessions=%s..%s",
+        player_id, file_name, imp.legend_count, imp.weapon_count, imp.match_count,
         payload.as_of, payload.session_start, payload.session_end,
     )
     return {
@@ -489,6 +623,7 @@ async def import_ea_export(
         "file_name": imp.file_name,
         "match_count": imp.match_count,
         "legend_count": imp.legend_count,
+        "weapon_count": imp.weapon_count,
         "data_start": imp.data_start,
         "data_end": imp.data_end,
     }

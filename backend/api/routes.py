@@ -23,7 +23,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from backend.db.models import EaImport, Player, Snapshot
 from backend.integrations.apex_api import ApexClient
 from backend.integrations.exceptions import ApexError, PlayerNotFoundError
-from backend.services.calibration_service import calibration_overlay, compute_calibration
+from backend.services.calibration_service import (
+    calibration_overlay,
+    compute_calibration,
+    compute_weapon_calibration,
+)
 from backend.services.ea_export_service import EaExportError, import_ea_export
 from backend.services.snapshot_service import capture_snapshot, parse_bridge
 
@@ -46,6 +50,7 @@ from .schemas import (
     PlayerOut,
     PlayerUpdate,
     TrackerPercentile,
+    WeaponCalibrationOut,
     WeaponStat,
 )
 
@@ -696,10 +701,42 @@ async def get_breakdown(
     legends = [LegendRollup(**r, img=legend_imgs.get(r["legend"])) for r in rollup.values()]
     legends.sort(key=lambda x: (x.kills or 0), reverse=True)
 
-    # Weapon mastery is flaky (which weapons are returned varies per fetch);
-    # merge across recent snapshots keeping the max (monotonic) value per weapon.
-    weapons = _merge_mastery(recent_raw, "_kills")
-    weapon_damage = _merge_mastery(recent_raw, "_damage_done")
+    # Weapon mastery is flaky (which weapons are returned varies per fetch) and
+    # incomplete — the trackers only ever expose a subset. Merge tracker max
+    # values with the EA export's official per-weapon career stats: top stale
+    # values up, add weapons the site never saw, and carry headshots/accuracy.
+    try:
+        weapon_report = await compute_weapon_calibration(sf, player_id)
+    except Exception:  # noqa: BLE001 — calibration must never break the page
+        logger.exception("weapon calibration failed for player %s", player_id)
+        weapon_report = None
+
+    if weapon_report is not None and weapon_report.weapons:
+        weapons = [
+            WeaponStat(
+                name=w.weapon,
+                value=w.calibrated_kills or 0,
+                headshots=w.headshots,
+                shots=w.shots,
+                hits=w.hits,
+                is_calibrated=w.is_calibrated,
+            )
+            for w in weapon_report.weapons if (w.calibrated_kills or 0) > 0
+        ]
+        weapon_damage = [
+            WeaponStat(
+                name=w.weapon,
+                value=w.calibrated_damage or 0,
+                headshots=w.headshots,
+                shots=w.shots,
+                hits=w.hits,
+                is_calibrated=w.is_calibrated,
+            )
+            for w in weapon_report.weapons if (w.calibrated_damage or 0) > 0
+        ]
+    else:
+        weapons = _merge_mastery(recent_raw, "_kills")
+        weapon_damage = _merge_mastery(recent_raw, "_damage_done")
 
     return BreakdownOut(
         player_id=player_id, captured_at=snap.captured_at,
@@ -801,6 +838,7 @@ async def get_calibration_report(
     report = await compute_calibration(sf, player_id)
     if report is None:
         raise HTTPException(status_code=404, detail="no snapshots yet for this player")
+    weapon_report = await compute_weapon_calibration(sf, player_id)
     return CalibrationOut(
         player_id=report.player_id,
         ea_as_of=report.ea_as_of,
@@ -811,5 +849,9 @@ async def get_calibration_report(
         legends=[
             LegendCalibrationOut.model_validate(row, from_attributes=True)
             for row in report.legends
+        ],
+        weapons=[
+            WeaponCalibrationOut.model_validate(w, from_attributes=True)
+            for w in weapon_report.weapons
         ],
     )

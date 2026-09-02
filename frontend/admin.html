@@ -128,6 +128,21 @@
           「缺失」= EA 官方计数里、而网站追踪器从未反映的量，主面板已自动用「校准值」补上。<br />
           导出日期之后的对局只有追踪器能看到 —— 校准值取两者较大者，不会把新鲜数据改小；追踪器恢复更新或重新导入更新的导出后，缺失量自动回落。EA 匿名化无法归属的传奇计数不计入缺失合计。
         </div>
+        <h2 style="margin-top:22px">武器对账<span class="sub">EA 官方武器生涯数据 vs 网站精通追踪器（追踪器只能看到部分武器）</span></h2>
+        <div class="table-wrap">
+          <table id="weapon-table">
+            <thead>
+              <tr>
+                <th>武器</th>
+                <th>追踪器击杀</th><th>EA官方击杀</th><th>击杀缺失</th><th>校准击杀</th>
+                <th>追踪器伤害</th><th>EA官方伤害</th>
+                <th>爆头</th><th>命中率</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="empty" id="weapon-empty" hidden>暂无武器对账数据</div>
       </div>
     </div>
   </div>
@@ -262,10 +277,12 @@
         $("#report-empty").hidden = legends.length > 0;
         const unattr = (rep.unattributed_kills || rep.unattributed_damage)
           ? `<span class="chip2">EA匿名无法归属<b>${num(rep.unattributed_kills)}杀 / ${num(rep.unattributed_damage)}</b></span>` : "";
+        const wmiss = (rep.weapons || []).filter((w) => w.missing_kills > 0 || (w.tracker_kills == null && w.ea_kills > 0)).length;
         $("#report-summary").innerHTML = `
           <span class="chip2">EA数据截至<b>${fmtDate(rep.ea_as_of)}</b></span>
           <span class="chip2">击杀缺失合计<b>${num(rep.total_missing_kills)}</b></span>
-          <span class="chip2">伤害缺失合计<b>${num(rep.total_missing_damage)}</b></span>${unattr}`;
+          <span class="chip2">伤害缺失合计<b>${num(rep.total_missing_damage)}</b></span>
+          <span class="chip2">武器待校准<b>${wmiss}</b></span>${unattr}`;
         $("#report-table tbody").innerHTML = legends.map((r) => `<tr class="${r.missing_kills > 0 || r.missing_damage > 0 ? "is-missing" : ""}">
           <td>${r.legend}</td>
           <td>${num(r.ea_games_played)}</td>
@@ -278,6 +295,29 @@
           <td>${r.missing_damage > 0 ? `<span class="miss">+${num(r.missing_damage)}</span>` : "0"}</td>
           <td>${r.is_calibrated ? `<span class="cal">${num(r.calibrated_damage)}</span>` : num(r.calibrated_damage)}</td>
         </tr>`).join("");
+
+        const weapons = rep.weapons || [];
+        $("#weapon-empty").hidden = weapons.length > 0;
+        $("#weapon-table tbody").innerHTML = weapons.map((w) => {
+          // 霰弹枪 hits 按弹丸计会超过 shots，命中率无意义
+          const acc = w.shots && w.hits != null && w.hits <= w.shots
+            ? ((w.hits / w.shots) * 100).toFixed(1) + "%" : "—";
+          const isNew = w.tracker_kills == null && (w.ea_kills || 0) > 0;
+          const miss = w.missing_kills > 0
+            ? `<span class="miss">+${num(w.missing_kills)}</span>`
+            : (isNew ? `<span class="miss">新</span>` : "0");
+          return `<tr class="${w.missing_kills > 0 || w.missing_damage > 0 || isNew ? "is-missing" : ""}">
+            <td>${w.weapon}</td>
+            <td>${num(w.tracker_kills)}</td>
+            <td>${num(w.ea_kills)}</td>
+            <td>${miss}</td>
+            <td>${w.is_calibrated ? `<span class="cal">${num(w.calibrated_kills)}</span>` : num(w.calibrated_kills)}</td>
+            <td>${num(w.tracker_damage)}</td>
+            <td>${num(w.ea_damage)}</td>
+            <td>${num(w.headshots)}</td>
+            <td>${acc}</td>
+          </tr>`;
+        }).join("");
       }
 
       // --- init ---

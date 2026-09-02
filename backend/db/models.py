@@ -121,6 +121,11 @@ class EaImport(Base):
     # Per-legend lifetime stats extracted (the actual reconciliation source —
     # real exports carry stat tables, not match lists).
     legend_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    weapon_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Which parser produced the extracted rows. Re-uploading the same file only
+    # counts as a duplicate when the parser version matches too — a parser
+    # upgrade re-extracts from the same bytes as a fresh import.
+    parser_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=text("CURRENT_TIMESTAMP"), nullable=False
     )
@@ -158,6 +163,38 @@ class EaLegendStat(Base):
 
     __table_args__ = (
         UniqueConstraint("import_id", "legend", name="uq_ea_legend_stats_import_legend"),
+    )
+
+
+class EaWeaponStat(Base):
+    """Official per-weapon lifetime stats from an EA export's gameDataTable
+    (`stats.weapons[<id>].kills/damage_done/headshots/shots/hits`).
+
+    Richer than the site's flaky mastery trackers (which only expose some
+    weapons' kills/damage): EA has every weapon, plus headshots and
+    shot/hit counts (accuracy). `weapon` stores the EA id verbatim
+    (e.g. "mp_weapon_r97"); display mapping happens at read time.
+    """
+
+    __tablename__ = "ea_weapon_stats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    import_id: Mapped[int] = mapped_column(
+        ForeignKey("ea_imports.id", ondelete="CASCADE"), nullable=False
+    )
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("players.id", ondelete="CASCADE"), nullable=False
+    )
+    weapon: Mapped[str] = mapped_column(String(64), nullable=False)
+    kills: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    damage: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    headshots: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    shots: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    as_of: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("import_id", "weapon", name="uq_ea_weapon_stats_import_weapon"),
     )
 
 
