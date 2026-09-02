@@ -21,7 +21,12 @@ DISPLAY_NAME=你的名字
 DB_PATH=data/apex.db
 SNAPSHOT_INTERVAL_MIN=10
 PLATFORM_DEFAULT=PC
+ADMIN_TOKEN=你的后台令牌
 ```
+
+> `ADMIN_TOKEN` 是 `/admin` 后台（EA 数据导出上传与对账）的登录令牌，生成方式：
+> `python -c "import secrets; print(secrets.token_urlsafe(24))"`。
+> 留空则整个后台对外表现为 404，无法上传。
 
 > API key 必须先在 https://portal.apexlegendsapi.com/discord-auth 绑定 Discord，否则所有请求返回 429。
 
@@ -87,7 +92,17 @@ docker compose up -d --build
 
 ### 数据备份
 
-定期备份 `./data/apex.db`（全部历史快照）。
+定期备份 `./data/apex.db`（全部历史快照 + EA 导入数据）。
+
+### EA 数据对账（上线后一次性操作）
+
+新容器启动时自动建 `ea_*` 新表（不影响历史快照）。然后在**服务器上**：
+
+1. 打开 `http://服务器IP:8000/admin`（或反代域名），输入 `ADMIN_TOKEN` 登录
+2. 选择玩家 → 上传 EA 导出 zip（就是你申请「下载您的EA数据」拿到的那个文件）
+3. 主面板立即生效：陈旧追踪器的传奇显示校准值 + 「校准」角标，KPI 合计同步补齐
+
+之后每次 EA 允许重新申请导出（一般隔几个月），在 `/admin` 再传一次即可刷新基线；重复上传同一文件自动跳过。本地的 `user_data.zip` **不会**被打进镜像（Dockerfile 只 COPY backend/frontend/scripts），别把它传到服务器公开目录。
 
 ### 国内服务器访问 API
 

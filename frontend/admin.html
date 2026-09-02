@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>后台 · EA 数据对账 · APEX BOARD</title>
+  <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <style>
+    /* admin 页私有样式（复用主面板变量与卡片风格） */
+    body { background: var(--bg); color: var(--text); font-family: "Inter", "Noto Sans SC", sans-serif; }
+    .admin-wrap { max-width: 1100px; margin: 0 auto; padding: 22px 16px 48px; }
+    .admin-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .admin-title { font: 700 20px "Chakra Petch", sans-serif; letter-spacing: 2px; text-transform: uppercase; }
+    .admin-title small { display: block; font: 500 12px "Inter", "Noto Sans SC", sans-serif; color: var(--text-mute); letter-spacing: 0.5px; margin-top: 4px; }
+    .back-link { color: var(--text-mute); font: 600 12px "Chakra Petch", sans-serif; letter-spacing: 1px; text-decoration: none; }
+    .back-link:hover { color: var(--accent); }
+
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 18px; position: relative; overflow: hidden; }
+    .card::before { content: ""; position: absolute; top: 0; left: 0; width: 60px; height: 2px; background: var(--accent); }
+    .card h2 { font: 700 14px "Chakra Petch", sans-serif; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px; }
+    .card h2 .sub { font: 500 12px "Inter", "Noto Sans SC", sans-serif; color: var(--text-mute); text-transform: none; letter-spacing: 0.3px; margin-left: 8px; }
+
+    .field { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .field + .field { margin-top: 12px; }
+    .field label { font: 600 12px "Chakra Petch", sans-serif; color: var(--text-mute); letter-spacing: 1px; min-width: 64px; }
+    input[type="password"], input[type="text"], select, input[type="file"] {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      border-radius: 4px; padding: 8px 10px; font: 500 13px "Inter", "Noto Sans SC", sans-serif;
+    }
+    input[type="file"] { max-width: 340px; }
+    .btn {
+      background: var(--accent); color: #fff; border: none; cursor: pointer;
+      font: 700 12px "Chakra Petch", sans-serif; letter-spacing: 1.5px; text-transform: uppercase;
+      padding: 9px 18px; border-radius: 4px; clip-path: var(--clip); transition: filter 0.15s;
+    }
+    .btn:hover { filter: brightness(1.15); }
+    .btn:disabled { filter: grayscale(0.8) brightness(0.7); cursor: not-allowed; }
+    .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text-mute); }
+
+    .msg { margin-top: 12px; font: 500 13px "Inter", "Noto Sans SC", sans-serif; display: none; padding: 10px 12px; border-radius: 4px; }
+    .msg.ok { display: block; color: #4ade80; background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.3); }
+    .msg.err { display: block; color: var(--accent); background: rgba(255, 59, 59, 0.08); border: 1px solid rgba(255, 59, 59, 0.3); }
+    .msg.info { display: block; color: var(--amber); background: rgba(255, 180, 84, 0.08); border: 1px solid rgba(255, 180, 84, 0.3); }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font: 500 12px "Inter", "Noto Sans SC", sans-serif; }
+    th { font: 700 11px "Chakra Petch", sans-serif; letter-spacing: 1px; text-transform: uppercase; color: var(--text-mute); text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    td { padding: 7px 10px; text-align: right; border-bottom: 1px solid rgba(38, 43, 58, 0.5); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    tr.is-missing td { background: rgba(255, 180, 84, 0.06); }
+    td .miss { color: var(--amber); font-weight: 700; }
+    td .cal { color: #4ade80; font-weight: 700; }
+
+    .summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .chip2 { border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; font: 600 12px "Chakra Petch", sans-serif; letter-spacing: 0.5px; color: var(--text-mute); }
+    .chip2 b { color: var(--amber); margin-left: 6px; }
+    .note { font: 500 12px "Inter", "Noto Sans SC", sans-serif; color: var(--text-mute); margin-top: 12px; line-height: 1.7; }
+    .locked { display: none; }
+    .empty { color: var(--text-mute); font: 500 13px "Inter", "Noto Sans SC", sans-serif; padding: 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="admin-wrap">
+    <div class="admin-top">
+      <div class="admin-title">EA 数据对账后台<small>上传 EA 账户数据导出 · 与追踪器数据对账校准</small></div>
+      <a class="back-link" href="/">← 返回面板</a>
+    </div>
+
+    <!-- 登录 -->
+    <div class="card" id="login-card">
+      <h2>管理员验证</h2>
+      <div class="field">
+        <label for="token">令牌</label>
+        <input type="password" id="token" placeholder="ADMIN_TOKEN（服务端 .env 配置）" style="flex:1; min-width: 240px" />
+        <button class="btn" id="login-btn">验证</button>
+      </div>
+      <div class="msg" id="login-msg"></div>
+    </div>
+
+    <div class="locked" id="main">
+      <!-- 上传 -->
+      <div class="card">
+        <h2>上传导出文件<span class="sub">EA 账户 → 隐私设置 → 下载您的EA数据（zip，无需解压；重复上传同一文件自动跳过）</span></h2>
+        <div class="field">
+          <label for="player">玩家</label>
+          <select id="player"></select>
+        </div>
+        <div class="field">
+          <label for="file">文件</label>
+          <input type="file" id="file" accept=".zip" />
+          <button class="btn" id="upload-btn">导入</button>
+        </div>
+        <div class="msg" id="upload-msg"></div>
+      </div>
+
+      <!-- 导入历史 -->
+      <div class="card">
+        <h2>导入历史</h2>
+        <div class="table-wrap">
+          <table id="imports-table">
+            <thead><tr><th>文件</th><th>传奇数</th><th>对局数</th><th>数据起点</th><th>数据终点</th><th>导入时间</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="empty" id="imports-empty" hidden>还没有导入过任何导出文件</div>
+      </div>
+
+      <!-- 对账报告 -->
+      <div class="card">
+        <h2>对账报告<span class="sub">EA 官方终身数据 vs 网站追踪器读数（缺失 = EA − 追踪器，取非负）</span></h2>
+        <div class="summary" id="report-summary"></div>
+        <div class="table-wrap">
+          <table id="report-table">
+            <thead>
+              <tr>
+                <th>传奇</th><th>EA场次</th>
+                <th>追踪器击杀</th><th>EA官方击杀</th><th>击杀缺失</th><th>校准击杀</th>
+                <th>追踪器伤害</th><th>EA官方伤害</th><th>伤害缺失</th><th>校准伤害</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="empty" id="report-empty" hidden>该玩家还没有可对账的数据（需先导入 EA 导出且有快照）</div>
+        <div class="note">
+          「缺失」= EA 官方计数里、而网站追踪器从未反映的量，主面板已自动用「校准值」补上。<br />
+          导出日期之后的对局只有追踪器能看到 —— 校准值取两者较大者，不会把新鲜数据改小；追踪器恢复更新或重新导入更新的导出后，缺失量自动回落。EA 匿名化无法归属的传奇计数不计入缺失合计。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const $ = (s) => document.querySelector(s);
+      const TOKEN_KEY = "ea_admin_token";
+      const state = { token: localStorage.getItem(TOKEN_KEY) || "", players: [], playerId: null };
+
+      function authHeaders() { return { Authorization: "Bearer " + state.token }; }
+
+      async function apiJson(url, opts = {}) {
+        const resp = await fetch(url, { ...opts, headers: { Accept: "application/json", ...(opts.headers || {}) } });
+        let payload = null;
+        try { payload = await resp.json(); } catch (_) { /* non-JSON */ }
+        if (!resp.ok) {
+          const msg = payload?.detail || payload?.error?.message || ("HTTP " + resp.status);
+          throw new Error(msg);
+        }
+        return payload;
+      }
+
+      function setMsg(el, text, kind) {
+        el.className = "msg " + kind;
+        el.textContent = text;
+      }
+
+      const fmtDate = (iso) => {
+        if (!iso) return "—";
+        const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z");
+        return isNaN(d) ? iso : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      };
+      const fmtDT = (iso) => {
+        if (!iso) return "—";
+        const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z");
+        return isNaN(d) ? iso : d.toLocaleString("zh-CN", { hour12: false });
+      };
+      const num = (v) => (v == null ? "—" : Number(v).toLocaleString());
+
+      // --- 登录 ---
+      async function verify(showErr) {
+        if (!state.token) return false;
+        try {
+          await apiJson("/api/admin/ea-imports?player_id=0", { headers: authHeaders() });
+          return true; // 200 或 404（player 无关的鉴权通过即可）
+        } catch (err) {
+          if (showErr) setMsg($("#login-msg"), "令牌无效：" + err.message, "err");
+          return false;
+        }
+      }
+
+      async function login() {
+        state.token = $("#token").value.trim();
+        const ok = await verify(true);
+        if (ok) {
+          localStorage.setItem(TOKEN_KEY, state.token);
+          unlock();
+        }
+      }
+
+      function unlock() {
+        $("#login-card").style.display = "none";
+        $("#main").style.display = "block";
+        loadPlayers().then(refreshAll);
+      }
+
+      // --- 玩家 ---
+      async function loadPlayers() {
+        state.players = await apiJson("/api/players");
+        const sel = $("#player");
+        if (!state.players.length) { sel.innerHTML = '<option value="">暂无追踪玩家</option>'; return; }
+        sel.innerHTML = state.players.map((p) => `<option value="${p.id}">${p.display_name || p.username || p.uid} · ${p.platform}</option>`).join("");
+        state.playerId = state.players[0].id;
+        sel.addEventListener("change", () => { state.playerId = Number(sel.value) || null; refreshAll(); });
+      }
+
+      // --- 上传 ---
+      async function upload() {
+        const file = $("#file").files[0];
+        if (!file) { setMsg($("#upload-msg"), "请先选择导出 zip 文件", "err"); return; }
+        if (!state.playerId) { setMsg($("#upload-msg"), "请先选择玩家", "err"); return; }
+        const btn = $("#upload-btn");
+        btn.disabled = true; btn.textContent = "导入中…";
+        setMsg($("#upload-msg"), "正在解析并导入（对局较多时可能需要几十秒）…", "info");
+        try {
+          const result = await apiJson(
+            `/api/admin/ea-import?player_id=${state.playerId}&filename=${encodeURIComponent(file.name)}`,
+            { method: "POST", headers: authHeaders(), body: file }
+          );
+          setMsg($("#upload-msg"),
+            result.duplicate
+              ? `该文件此前已导入过（${result.legend_count} 个传奇 / ${result.match_count} 场对局），未重复处理`
+              : `导入成功：${result.legend_count} 个传奇的官方数据` + (result.match_count ? `，${result.match_count} 场对局` : "") + `，数据覆盖 ${fmtDate(result.data_start)} ~ ${fmtDate(result.data_end)}`,
+            "ok");
+          await refreshAll();
+        } catch (err) {
+          setMsg($("#upload-msg"), "导入失败：" + err.message, "err");
+        } finally {
+          btn.disabled = false; btn.textContent = "导入";
+        }
+      }
+
+      // --- 历史 & 报告 ---
+      async function refreshAll() {
+        await Promise.all([loadImports(), loadReport()]);
+      }
+
+      async function loadImports() {
+        const rows = await apiJson("/api/admin/ea-imports", { headers: authHeaders() });
+        const tbody = $("#imports-table tbody");
+        $("#imports-empty").hidden = rows.length > 0;
+        tbody.innerHTML = rows.map((r) => `<tr>
+          <td>${r.file_name}</td><td>${num(r.legend_count)}</td><td>${num(r.match_count)}</td>
+          <td>${fmtDate(r.data_start)}</td><td>${fmtDate(r.data_end)}</td><td>${fmtDT(r.ingested_at)}</td>
+        </tr>`).join("");
+      }
+
+      async function loadReport() {
+        if (!state.playerId) return;
+        let rep;
+        try {
+          rep = await apiJson(`/api/admin/ea-report/${state.playerId}`, { headers: authHeaders() });
+        } catch (err) {
+          $("#report-empty").hidden = false;
+          $("#report-empty").textContent = "暂无报告：" + err.message;
+          $("#report-summary").innerHTML = "";
+          $("#report-table tbody").innerHTML = "";
+          return;
+        }
+        const legends = rep.legends || [];
+        $("#report-empty").hidden = legends.length > 0;
+        const unattr = (rep.unattributed_kills || rep.unattributed_damage)
+          ? `<span class="chip2">EA匿名无法归属<b>${num(rep.unattributed_kills)}杀 / ${num(rep.unattributed_damage)}</b></span>` : "";
+        $("#report-summary").innerHTML = `
+          <span class="chip2">EA数据截至<b>${fmtDate(rep.ea_as_of)}</b></span>
+          <span class="chip2">击杀缺失合计<b>${num(rep.total_missing_kills)}</b></span>
+          <span class="chip2">伤害缺失合计<b>${num(rep.total_missing_damage)}</b></span>${unattr}`;
+        $("#report-table tbody").innerHTML = legends.map((r) => `<tr class="${r.missing_kills > 0 || r.missing_damage > 0 ? "is-missing" : ""}">
+          <td>${r.legend}</td>
+          <td>${num(r.ea_games_played)}</td>
+          <td>${num(r.tracker_kills)}</td>
+          <td>${num(r.ea_kills)}</td>
+          <td>${r.missing_kills > 0 ? `<span class="miss">+${num(r.missing_kills)}</span>` : "0"}</td>
+          <td>${r.is_calibrated ? `<span class="cal">${num(r.calibrated_kills)}</span>` : num(r.calibrated_kills)}</td>
+          <td>${num(r.tracker_damage)}</td>
+          <td>${num(r.ea_damage)}</td>
+          <td>${r.missing_damage > 0 ? `<span class="miss">+${num(r.missing_damage)}</span>` : "0"}</td>
+          <td>${r.is_calibrated ? `<span class="cal">${num(r.calibrated_damage)}</span>` : num(r.calibrated_damage)}</td>
+        </tr>`).join("");
+      }
+
+      // --- init ---
+      $("#login-btn").addEventListener("click", login);
+      $("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+      $("#upload-btn").addEventListener("click", upload);
+
+      (async () => {
+        if (state.token && (await verify(false))) unlock();
+        else {
+          $("#login-card").style.display = "block";
+          $("#main").style.display = "none";
+        }
+      })();
+    })();
+  </script>
+</body>
+</html>

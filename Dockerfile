@@ -8,16 +8,25 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -rf /var/lib/apt/lists/*
 
-# Editable install so backend/ stays at /app/backend and the app can resolve
-# frontend/ and data/ relative to the package source.
+# Step 1: Install dependencies only (cached unless pyproject.toml changes).
+# This layer survives source-code edits, so pip doesn't re-download on every build.
 COPY pyproject.toml ./
-COPY backend/ backend/
-# Aliyun PyPI mirror — fast in mainland China (works elsewhere too).
-RUN pip install --no-cache-dir -e . -i https://mirrors.aliyun.com/pypi/simple/
+RUN pip install --no-cache-dir \
+    fastapi>=0.110 \
+    "uvicorn[standard]>=0.27" \
+    httpx>=0.27 \
+    "sqlalchemy>=2.0" \
+    aiosqlite>=0.20 \
+    "apscheduler>=3.10" \
+    "tenacity>=8.2"
 
-# Non-package application sources.
+# Step 2: Copy source code (changes often, but deps are already cached).
+COPY backend/ backend/
 COPY frontend/ frontend/
 COPY scripts/ scripts/
+
+# Ensure backend package is importable without editable install.
+ENV PYTHONPATH=/app
 
 RUN mkdir -p data
 

@@ -8,6 +8,7 @@ DB + fake client by building the app with `create_app(...)`.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import time
@@ -19,19 +20,25 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.db.models import Player, Snapshot
+from backend.db.models import EaImport, Player, Snapshot
 from backend.integrations.apex_api import ApexClient
 from backend.integrations.exceptions import ApexError, PlayerNotFoundError
+from backend.services.calibration_service import calibration_overlay, compute_calibration
+from backend.services.ea_export_service import EaExportError, import_ea_export
 from backend.services.snapshot_service import capture_snapshot, parse_bridge
 
 from .schemas import (
     BreakdownOut,
+    CalibrationOut,
     CurrentStats,
     DayStat,
     DeltasOut,
+    EaImportOut,
+    EaImportResult,
     HistoryOut,
     HistoryPoint,
     LegendActivity,
+    LegendCalibrationOut,
     LegendDaily,
     LegendRollup,
     LegendsOut,
@@ -96,6 +103,17 @@ def get_current_cache(request: Request) -> TTLCache:
 
 def get_display_name_override(request: Request) -> str | None:
     return request.app.state.display_name_override
+
+
+def require_admin(request: Request) -> None:
+    """Guard for /api/admin/*. No ADMIN_TOKEN configured ⇒ the whole admin
+    surface 404s (invisible from outside); a wrong token gets a clean 401."""
+    token: str = getattr(request.app.state, "admin_token", "") or ""
+    if not token:
+        raise HTTPException(status_code=404, detail="Not Found")
+    auth = request.headers.get("authorization") or ""
+    if not hmac.compare_digest(auth, f"Bearer {token}"):
+        raise HTTPException(status_code=401, detail="invalid admin token")
 
 
 def _require_client(client: ApexClient | None) -> ApexClient:
@@ -297,7 +315,21 @@ async def get_legends(
     selected_dict = legends.get("selected") or {}
     selected_name = next(iter(selected_dict)) if isinstance(selected_dict, dict) and selected_dict else None
     all_legends = legends.get("all") or {}
-    return LegendsOut(player_id=player_id, selected=selected_name, legends=all_legends)
+
+    # EA-export calibration overlay (cached; None when nothing imported)
+    try:
+        report = await compute_calibration(sf, player_id)
+        overlay = calibration_overlay(report)
+    except Exception:  # noqa: BLE001 — calibration must never break the page
+        logger.exception("calibration overlay failed for player %s", player_id)
+        overlay = {}
+
+    return LegendsOut(
+        player_id=player_id,
+        selected=selected_name,
+        legends=all_legends,
+        calibration=overlay or None,
+    )
 
 
 _DELTA_METRICS = ("rank_score", "level", "kills", "damage")
@@ -404,6 +436,14 @@ async def get_deltas(
     # Split into today (Beijing-midnight anchored) and yesterday (for fallback)
     today_rows = [r for r in rows if r.captured_at >= today_since]
     yesterday_rows = [r for r in rows if r.captured_at < today_since]
+
+    # 如果昨日不足2条快照，往前多取一些确保能算增量
+    if len(yesterday_rows) < 2 and len(rows) >= 2:
+        # 用今日之前最近的2条快照算"昨日"
+        pre_today = [r for r in rows if r.captured_at < today_since]
+        if len(pre_today) < 2:
+            pre_today = rows[:2] if len(rows) >= 2 else rows
+        yesterday_rows = pre_today
 
     today_deltas = _compute_deltas_from_rows(today_rows)
     yesterday_deltas = _compute_deltas_from_rows(yesterday_rows) if len(yesterday_rows) >= 2 else None
@@ -685,4 +725,91 @@ async def proxy_img(url: str = Query(...)) -> Response:
     return Response(
         content=upstream.content,
         media_type=upstream.headers.get("content-type", "image/jpeg"),
+    )
+
+
+# --- admin: EA data export ingestion & calibration (token-protected) ---
+#
+# The upload is a raw-body POST (zip bytes as the request body, filename via
+# query param) — avoids a python-multipart dependency; the browser fetch()
+# sends a File object as body natively.
+
+_MAX_EXPORT_BYTES = 200 * 1024 * 1024  # real exports are a few MB; guard rails only
+
+
+@router.post(
+    "/admin/ea-import",
+    response_model=EaImportResult,
+    dependencies=[Depends(require_admin)],
+)
+async def upload_ea_import(
+    request: Request,
+    player_id: int = Query(...),
+    filename: str = Query("ea-export.zip"),
+    sf: async_sessionmaker = Depends(get_session_factory),
+) -> EaImportResult:
+    """Ingest an EA data export zip (raw body) for one player, then return the
+    import summary. Re-uploading the same file is a no-op."""
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="empty upload body")
+    if len(body) > _MAX_EXPORT_BYTES:
+        raise HTTPException(status_code=413, detail="export file too large")
+    async with sf() as session:
+        player = await session.get(Player, player_id)
+    if player is None:
+        raise PlayerNotFoundError(f"player id={player_id} not found")
+
+    try:
+        result = await import_ea_export(sf, player_id, filename, body)
+    except EaExportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return EaImportResult(**result)
+
+
+@router.get(
+    "/admin/ea-imports",
+    response_model=list[EaImportOut],
+    dependencies=[Depends(require_admin)],
+)
+async def list_ea_imports(
+    player_id: int | None = Query(None),
+    sf: async_sessionmaker = Depends(get_session_factory),
+) -> list[EaImport]:
+    stmt = select(EaImport).order_by(EaImport.ingested_at.desc()).limit(50)
+    if player_id is not None:
+        stmt = stmt.where(EaImport.player_id == player_id)
+    async with sf() as session:
+        return list((await session.execute(stmt)).scalars().all())
+
+
+@router.get(
+    "/admin/ea-report/{player_id}",
+    response_model=CalibrationOut,
+    dependencies=[Depends(require_admin)],
+)
+async def get_calibration_report(
+    player_id: int,
+    sf: async_sessionmaker = Depends(get_session_factory),
+) -> CalibrationOut:
+    """Full reconciliation report: per-legend EA truth vs site trackers."""
+    async with sf() as session:
+        player = await session.get(Player, player_id)
+    if player is None:
+        raise PlayerNotFoundError(f"player id={player_id} not found")
+
+    report = await compute_calibration(sf, player_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="no snapshots yet for this player")
+    return CalibrationOut(
+        player_id=report.player_id,
+        ea_as_of=report.ea_as_of,
+        total_missing_kills=report.total_missing_kills,
+        total_missing_damage=report.total_missing_damage,
+        unattributed_kills=report.unattributed_kills,
+        unattributed_damage=report.unattributed_damage,
+        legends=[
+            LegendCalibrationOut.model_validate(row, from_attributes=True)
+            for row in report.legends
+        ],
     )

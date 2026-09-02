@@ -21,6 +21,10 @@ class Settings:
     snapshot_interval_min: int = 10
     platform_default: str = "PC"
     display_name: str = ""
+    # Shared secret for /api/admin/* (EA export upload etc.). Empty disables
+    # the whole admin surface (routes 404), so a public deployment without a
+    # token accepts no uploads at all.
+    admin_token: str = ""
 
 
 def _load_dotenv(path: Path) -> None:
@@ -43,4 +47,5 @@ def get_settings() -> Settings:
         snapshot_interval_min=int(os.environ.get("SNAPSHOT_INTERVAL_MIN", "10")),
         platform_default=os.environ.get("PLATFORM_DEFAULT", "PC"),
         display_name=os.environ.get("DISPLAY_NAME", ""),
+        admin_token=os.environ.get("ADMIN_TOKEN", ""),
     )

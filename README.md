@@ -4,7 +4,8 @@ Apex Legends 个人战绩分析仪表盘。实时获取聚合战绩、定时快�
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.141+-green) ![Docker](https://img.shields.io/badge/Docker-ready-blue) ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-![image-20260806195243913](assets/image-20260806195243913.png)
+<!-- 截图占位：替换为你的仪表盘截图 -->
+<!-- ![dashboard](screenshots/dashboard.png) -->
 
 ---
 
@@ -19,6 +20,7 @@ Apex Legends 个人战绩分析仪表盘。实时获取聚合战绩、定时快�
 | **主打传奇** | 自动识别主玩传奇，立绘背景 + 流动灯带 + 近 7 天增量 |
 | **武器精通** | 账号级每把武器的击杀 + 伤害（跨快照合并，稳定完整）|
 | **每日记录** | 各传奇 × 7 天的击杀/伤害表格 |
+| **EA 数据对账** | 上传 EA 账户数据导出（近一年对局真值），自动找出陈旧追踪器漏掉的数据并校准显示（`/admin` 后台）|
 | **段位徽章** | 按段位配色（青铜棕→猎杀红）+ 脉冲发光，随赛季自动切换 |
 | **实时状态** | 在线 / 大厅 / 游戏中 · 当前传奇 |
 | **全中文** | 传奇名/武器名/UI 全汉化（官方简中译名）|
@@ -89,6 +91,19 @@ API 不会自动获取你的数据，需要先手动初始化：
 | `DB_PATH` | SQLite 文件路径 | data/apex.db |
 | `SNAPSHOT_INTERVAL_MIN` | 快照间隔（分钟）| 10 |
 | `PLATFORM_DEFAULT` | 默认平台 | PC |
+| `ADMIN_TOKEN` | `/admin` 后台令牌（EA 导出上传/对账）；留空则整个后台关闭 | 空 |
+
+## 🧭 EA 数据对账（校准陈旧追踪器）
+
+API 的各传奇数据来自**当前装备的追踪器**，很少玩的传奇读数会滞后数月，导致「各传奇战绩」与 KPI 合计偏低。EA 账户的「下载您的EA数据」导出包含**官方每传奇终身生涯数据**（与服务端追踪器同源），可用来直接对账修正：
+
+1. EA 账户 → 隐私设置 → 申请「下载您的EA数据」（等待数天至数周，邮件通知后下载 zip）
+2. `.env` 里配置 `ADMIN_TOKEN`，打开 `/admin`，输入令牌
+3. 选择玩家 → 上传 zip。重复上传同一文件自动跳过；建议每隔几个月（EA 允许时）重新下载导入，刷新 EA 基线
+
+公式（按传奇、按指标）：`缺失 = max(0, EA官方值 − 追踪器值)`，`校准值 = max(追踪器值, EA官方值)`。健康追踪器与 EA 完全一致（缺失为 0，零误伤）；陈旧追踪器补到官方值；导出日期之后的对局只有追踪器能看到，取较大者保证不会把新鲜数据改小。主面板自动生效：被校准的传奇带「校准」角标（悬浮看 原始值→校准值），KPI 合计同步补上缺失量。
+
+注意：EA 会匿名化部分传奇 ID（显示为 unknown），这些计数无法归属，只在后台报告中单独展示、不计入缺失合计。
 
 ## 📡 API
 
@@ -105,7 +120,11 @@ API 不会自动获取你的数据，需要先手动初始化：
 | GET | `/api/players/{id}/breakdown` | 武器精通 + 各传奇数据 |
 | GET | `/api/players/{id}/legend-activity?days=1` | 今日各传奇增量 |
 | GET | `/api/players/{id}/legend-daily?days=7` | 每日各传奇记录 |
+| GET | `/api/players/{id}/legends` | 各传奇追踪器原始数据 + EA 校准覆盖层 |
 | GET | `/api/img?url=` | 图片代理（避免浏览器直连）|
+| POST | `/api/admin/ea-import?player_id=` | 上传 EA 导出 zip（body 为文件，需 Bearer ADMIN_TOKEN）|
+| GET | `/api/admin/ea-imports` | 导入历史（需鉴权）|
+| GET | `/api/admin/ea-report/{id}` | 对账报告：EA 真值 vs 追踪器（需鉴权）|
 
 交互文档：`/docs`
 

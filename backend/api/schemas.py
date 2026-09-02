@@ -93,6 +93,9 @@ class LegendsOut(BaseModel):
     player_id: int
     selected: str | None
     legends: dict[str, Any]
+    # EA-export calibration overlay, keyed by legend name. Absent/empty when
+    # no EA data has been imported (or nothing needs fixing).
+    calibration: dict[str, dict[str, int]] | None = None
 
 
 class DeltasOut(BaseModel):
@@ -167,3 +170,61 @@ class BreakdownOut(BaseModel):
     weapons: list[WeaponStat]
     legends: list[LegendRollup] = []
     weapon_damage: list[WeaponStat] = []
+
+
+# --- EA data export ingestion & calibration ---
+
+class EaImportOut(BaseModel):
+    """One ingested EA data export file."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    player_id: int
+    file_name: str
+    file_hash: str
+    data_start: datetime | None = None
+    data_end: datetime | None = None
+    match_count: int
+    legend_count: int = 0
+    ingested_at: datetime
+
+
+class EaImportResult(BaseModel):
+    """Summary returned right after an upload (new or duplicate)."""
+
+    duplicate: bool
+    import_id: int
+    file_name: str
+    match_count: int
+    legend_count: int = 0
+    data_start: datetime | None = None
+    data_end: datetime | None = None
+
+
+class LegendCalibrationOut(BaseModel):
+    """Per-legend reconciliation row: EA official career counters vs the
+    site's tracker readings."""
+
+    legend: str
+    tracker_kills: int | None = None
+    tracker_damage: int | None = None
+    ea_kills: int | None = None
+    ea_damage: int | None = None
+    ea_games_played: int | None = None
+    missing_kills: int = 0
+    missing_damage: int = 0
+    calibrated_kills: int | None = None
+    calibrated_damage: int | None = None
+    has_tracker: bool = False
+    is_calibrated: bool = False
+
+
+class CalibrationOut(BaseModel):
+    player_id: int
+    ea_as_of: datetime | None = None
+    total_missing_kills: int = 0
+    total_missing_damage: int = 0
+    unattributed_kills: int = 0
+    unattributed_damage: int = 0
+    legends: list[LegendCalibrationOut] = []

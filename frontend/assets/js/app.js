@@ -1,6 +1,9 @@
 /* App state + wiring: load players, render KPIs/charts, handle controls. */
 (() => {
-  const state = { players: [], playerId: null, metric: "damage", mainLegend: null, legendRows: [] };
+  const state = {
+    players: [], playerId: null, metric: "damage", mainLegend: null, legendRows: [],
+    calibration: {}, calibTotals: null, cur: null,
+  };
 
   // 趋势指标：dailyGain=每日从零开始的累计增量折线；cumulative=绝对总分；daily=每日增量柱
   const TREND_METRICS = {
@@ -124,6 +127,14 @@
     else node.textContent = value;
   }
 
+  // KPI 击杀/伤害 = 追踪器合计 + EA 对账缺失量（陈旧追踪器漏掉的部分）
+  function renderKpis(cur) {
+    const mk = (state.calibTotals && state.calibTotals.kills) || 0;
+    const md = (state.calibTotals && state.calibTotals.damage) || 0;
+    setKpi("kills", cur.kills == null ? null : cur.kills + mk, true);
+    setKpi("damage", cur.damage == null ? null : cur.damage + md, true);
+  }
+
   function showToast(msg) {
     els.toast.textContent = msg;
     els.toast.hidden = false;
@@ -150,7 +161,8 @@
     els.bannerRp.textContent = cur.rank_score != null ? `${Number(cur.rank_score).toLocaleString()} RP` : "";
     setKpi("rank", rankText);
     setKpi("level", cur.level, true);
-    setKpi("kills", cur.kills, true); setKpi("damage", cur.damage, true);
+    state.cur = cur;
+    renderKpis(cur);
     let rtCls = "rt-offline", rtTxt = "⚪ 离线";
     if (cur.is_in_game) { rtCls = "rt-game"; rtTxt = `🎮 游戏中${cur.selected_legend ? " · " + legendCn(cur.selected_legend) : ""}`; }
     else if (cur.is_online) { rtCls = "rt-lobby"; rtTxt = `🟠 大厅中${cur.selected_legend ? " · " + legendCn(cur.selected_legend) : ""}`; }
@@ -158,6 +170,15 @@
     els.rtBadge.textContent = rtTxt;
     const d = parseTs(cur.fetched_at);
     if (d) els.lastUpdated.textContent = `更新于 ${d.toLocaleTimeString()}`;
+  }
+
+  function sortLegendRows(rows) {
+    rows.sort((a, b) => {
+      const aw = (a.kills || 0) + (a.damage || 0), bw = (b.kills || 0) + (b.damage || 0);
+      if ((aw > 0) !== (bw > 0)) return aw > 0 ? -1 : 1;
+      return (b.kills || 0) - (a.kills || 0);
+    });
+    return rows;
   }
 
   function extractLegendStats(legendsObj) {
@@ -174,12 +195,28 @@
       }
       rows.push({ name, kills: kills != null ? kills : kfb, damage: damage != null ? damage : dfb });
     }
-    rows.sort((a, b) => {
-      const aw = (a.kills || 0) + (a.damage || 0), bw = (b.kills || 0) + (b.damage || 0);
-      if ((aw > 0) !== (bw > 0)) return aw > 0 ? -1 : 1;
-      return (b.kills || 0) - (a.kills || 0);
-    });
-    return rows;
+    return sortLegendRows(rows);
+  }
+
+  // 套用 EA 对账校准：陈旧追踪器的传奇用"追踪器值+缺失量"替换，并保留原始值供悬浮查看
+  function applyCalibration(rows, cal) {
+    if (!cal || !Object.keys(cal).length) return rows;
+    const byName = new Map(rows.map((r) => [r.name, r]));
+    for (const [name, c] of Object.entries(cal)) {
+      const r = byName.get(name);
+      if (r) {
+        r.rawKills = r.kills; r.rawDamage = r.damage;
+        if (c.calibrated_kills != null) r.kills = c.calibrated_kills;
+        if (c.calibrated_damage != null) r.damage = c.calibrated_damage;
+        r.calibrated = true;
+      } else {
+        byName.set(name, {
+          name, kills: c.calibrated_kills, damage: c.calibrated_damage,
+          rawKills: null, rawDamage: null, calibrated: true,
+        });
+      }
+    }
+    return sortLegendRows([...byName.values()]);
   }
 
   function fmtCompact(n) {
@@ -198,8 +235,11 @@
       const dpct = r.damage ? (r.damage / maxDamage) * 100 : 0;
       const empty = r.kills == null && r.damage == null ? " is-empty" : "";
       const main = r.name === state.mainLegend ? " is-main" : "";
+      const calBadge = r.calibrated
+        ? `<span class="cal-badge" title="EA 对账修正：击杀 ${r.rawKills == null ? "—" : r.rawKills} → ${fmtCompact(r.kills)}，伤害 ${r.rawDamage == null ? "—" : r.rawDamage} → ${fmtCompact(r.damage)}">校准</span>`
+        : "";
       return `<div class="legend-row${empty}${main}">
-        <div class="legend-name">${legendCn(r.name)}</div>
+        <div class="legend-name">${legendCn(r.name)}${calBadge}</div>
         <div class="legend-metric"><div class="bar-track"><div class="bar bar-kills" style="width:${kpct}%"></div></div><span class="metric-val">${fmtCompact(r.kills)}</span></div>
         <div class="legend-metric"><div class="bar-track"><div class="bar bar-damage" style="width:${dpct}%"></div></div><span class="metric-val">${fmtCompact(r.damage)}</span></div>
       </div>`;
@@ -323,7 +363,12 @@
 
   async function loadLegends() {
     const data = await API.getLegends(state.playerId);
-    state.legendRows = extractLegendStats(data.legends);
+    state.calibration = data.calibration || {};
+    state.legendRows = applyCalibration(extractLegendStats(data.legends), state.calibration);
+    let mk = 0, md = 0;
+    for (const c of Object.values(state.calibration)) { mk += c.missing_kills || 0; md += c.missing_damage || 0; }
+    state.calibTotals = { kills: mk, damage: md };
+    if (state.cur) renderKpis(state.cur);  // KPI 合计同步补上缺失量
     renderLegendList();
   }
   function renderLegendList() {
@@ -379,7 +424,18 @@
     els.weaponDamageChart.style.display = wdshow ? "block" : "none";
     els.weaponDamageEmpty.hidden = wdshow;
     if (wdshow) Charts.weaponBar("weapon-damage-chart", b.weapon_damage.map((w) => ({ name: trackerCnDamage(w.name), value: w.value })));
-    const featured = (b.legends || [])[0];
+    // 主打传奇按校准后的击杀重新排序（陈旧追踪器会低估场次多的传奇）
+    const cal = state.calibration || {};
+    const ranked = [...(b.legends || [])].map((l) => {
+      const c = cal[l.legend];
+      return c ? {
+        ...l,
+        kills: c.calibrated_kills != null ? c.calibrated_kills : l.kills,
+        damage: c.calibrated_damage != null ? c.calibrated_damage : l.damage,
+      } : l;
+    });
+    ranked.sort((a, b2) => (b2.kills || 0) - (a.kills || 0));
+    const featured = ranked[0];
     state.mainLegend = featured ? featured.legend : null;
     const act7 = await API.getLegendActivity(state.playerId, 7);
     const actMap = {};

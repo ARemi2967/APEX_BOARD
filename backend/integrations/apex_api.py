@@ -111,12 +111,21 @@ def _is_verification_required(response: httpx.Response) -> bool:
 class ApexClient:
     """Async client for `https://api.mozambiquehe.re/bridge`.
 
+    Handles connection-pool staleness (especially behind proxies like Clash):
+    - keepalive_expiry closes idle connections after 30s
+    - client is recycled after MAX_REQUESTS or MAX_CLIENT_AGE (whichever first)
+    - on transport error, client is force-recreated before retry
+
     Example:
         async with ApexClient(api_key) as client:
             data = await client.get_bridge("PlayerName", "PC")
     """
 
     BASE_URL = "https://api.mozambiquehe.re"
+
+    # Connection recycling thresholds
+    MAX_REQUESTS_PER_CLIENT = 100
+    MAX_CLIENT_AGE_SECONDS = 1800  # 30 min
 
     def __init__(
         self,
@@ -136,11 +145,54 @@ class ApexClient:
         self._max_retries = max_retries
         self._retry_min_wait = retry_min_wait
         self._retry_max_wait = retry_max_wait
+        self._timeout = timeout
+        self._transport = transport
+        self._request_count = 0
+        self._create_client()
+
+    def _create_client(self) -> None:
+        """(Re)create the underlying httpx client with anti-stale settings."""
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
-            timeout=timeout,
-            transport=transport,
+            timeout=httpx.Timeout(
+                connect=10.0,   # TCP connect (through proxy)
+                read=15.0,      # read response
+                write=10.0,     # send request
+                pool=5.0,       # wait for a pool slot
+            ),
+            transport=self._transport,
+            limits=httpx.Limits(
+                max_keepalive_connections=4,
+                max_connections=10,
+                keepalive_expiry=30.0,  # idle >30s → close (prevents stale)
+            ),
         )
+        self._request_count = 0
+        self._client_created_at = time.monotonic()
+
+    async def _maybe_recycle_client(self) -> None:
+        """Recycle if over request-count or age threshold."""
+        if (
+            self._request_count >= self.MAX_REQUESTS_PER_CLIENT
+            or time.monotonic() - self._client_created_at >= self.MAX_CLIENT_AGE_SECONDS
+        ):
+            logger.debug("recycling httpx client (requests=%d, age=%.0fs)",
+                        self._request_count, time.monotonic() - self._client_created_at)
+            await self._close_client()
+            self._create_client()
+
+    async def _recreate_on_error(self) -> None:
+        """Force-recreate client (drops ALL pooled connections). Used on transport errors."""
+        logger.debug("force-recreating httpx client after transport error")
+        await self._close_client()
+        self._create_client()
+
+    async def _close_client(self) -> None:
+        """Best-effort close; don't let close errors mask the real error."""
+        try:
+            await self._client.aclose()
+        except Exception:
+            pass
 
     async def __aenter__(self) -> "ApexClient":
         return self
@@ -154,7 +206,7 @@ class ApexClient:
         await self.close()
 
     async def close(self) -> None:
-        await self._client.aclose()
+        await self._close_client()
 
     async def get_bridge(self, player: str, platform: str) -> dict[str, Any]:
         """Fetch the bridge profile by in-game username.
@@ -222,11 +274,21 @@ class ApexClient:
             async for attempt in retrying:
                 with attempt:
                     await self._limiter.acquire()
+                    await self._maybe_recycle_client()
+                    self._request_count += 1
                     logger.debug(
-                        "bridge request %s platform=%s", identifier, platform
+                        "bridge request %s platform=%s (client_age=%.0fs, reqs=%d)",
+                        identifier, platform,
+                        time.monotonic() - self._client_created_at,
+                        self._request_count,
                     )
-                    response = await self._client.get("/bridge", params=params)
-                    self._classify_status(response, identifier, platform)
+                    try:
+                        response = await self._client.get("/bridge", params=params)
+                        self._classify_status(response, identifier, platform)
+                    except httpx.TransportError:
+                        # Stale/zombie connection → drop ALL pooled connections, recreate
+                        await self._recreate_on_error()
+                        raise  # let tenacity retry with the fresh client
         except _RetryableStatus as e:
             if e.status == 429:
                 raise ApexRateLimitError(

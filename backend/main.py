@@ -15,6 +15,7 @@ from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -89,6 +90,8 @@ def create_app(
     app.state.apex_client = client
     app.state.current_cache = TTLCache(ttl_seconds=30)
     app.state.display_name_override = settings.display_name or None
+    # Empty token ⇒ every /api/admin/* route 404s (EA export upload disabled).
+    app.state.admin_token = settings.admin_token
 
     app.add_middleware(
         CORSMiddleware,
@@ -103,6 +106,12 @@ def create_app(
     @app.get("/health")
     async def health() -> dict:
         return {"status": "ok"}
+
+    # StaticFiles(html=True) only maps directories to index.html, so /admin
+    # needs an explicit hop to the admin page.
+    @app.get("/admin", include_in_schema=False)
+    async def admin_page() -> RedirectResponse:
+        return RedirectResponse(url="/admin.html")
 
     # Serve the static frontend at "/" (Phase 5 fills these files).
     frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
