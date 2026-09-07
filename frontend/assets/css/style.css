@@ -223,6 +223,10 @@ body::before {
 
 /* ---------- per-legend list ---------- */
 .legend-list { max-height: 360px; overflow-y: auto; margin-top: 6px; padding-right: 4px; }
+/* 武器战绩列表复用传奇列表布局，但名字列要装下 名字+校准角标 */
+#weapon-list.legend-head, #weapon-list.legend-row { grid-template-columns: 132px 1fr 1fr; }
+#weapon-list .legend-name { display: flex; align-items: center; gap: 5px; }
+#weapon-list .legend-name .cal-badge { flex-shrink: 0; }
 .legend-list::-webkit-scrollbar { width: 8px; }
 .legend-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 4px; }
 .legend-list::-webkit-scrollbar-track { background: transparent; }

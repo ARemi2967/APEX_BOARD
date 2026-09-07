@@ -2,7 +2,7 @@
 (() => {
   const state = {
     players: [], playerId: null, metric: "damage", mainLegend: null, legendRows: [],
-    calibration: {}, calibTotals: null, cur: null,
+    calibration: {}, calibTotals: null, cur: null, weaponDamage: [],
   };
 
   // 趋势指标：dailyGain=每日从零开始的累计增量折线；cumulative=绝对总分；daily=每日增量柱
@@ -100,8 +100,7 @@
     trendEmpty: $("#trend-empty"), legendsEmpty: $("#legends-empty"), rankEmpty: $("#rank-empty"),
     trendChart: $("#trend-chart"), legendsList: $("#legends-list"), featuredLegend: $("#featured-legend"),
     rankChart: $("#rank-chart"),
-    rtBadge: $("#rt-badge"), weaponChart: $("#weapon-chart"), weaponEmpty: $("#weapon-empty"),
-    weaponDamageChart: $("#weapon-damage-chart"), weaponDamageEmpty: $("#weapon-damage-empty"),
+    rtBadge: $("#rt-badge"), weaponList: $("#weapon-list"), weaponEmpty: $("#weapon-empty"),
     toast: $("#toast"),
     activityList: $("#activity-list"), activityEmpty: $("#activity-empty"),
     recordsTable: $("#records-table"), recordsEmpty: $("#records-empty"),
@@ -412,26 +411,42 @@
     }
   }
 
+  // 武器裸中文名（不带"击杀/伤害"后缀），匹配不到时去掉英文后缀
+  const weaponNameOnly = (n) => {
+    if (!n) return "";
+    for (const en of _WEAPON_KEYS) if (n.includes(en)) return WEAPON_CN[en];
+    return n.replace(/\s*(Kills|Damage)$/i, "").replace(/^BR\s/, "");
+  };
+
+  // 武器战绩行式列表（与各传奇战绩同款布局：名字 + 击杀条 + 伤害条）
+  function renderWeaponRows(rows) {
+    if (!rows || !rows.length) { els.weaponList.innerHTML = ""; els.weaponEmpty.hidden = false; return; }
+    els.weaponEmpty.hidden = true;
+    const dmg = new Map((state.weaponDamage || []).map((w) => [w.name, w.value]));
+    const maxK = Math.max(1, ...rows.map((r) => r.value || 0));
+    const maxD = Math.max(1, ...rows.map((r) => dmg.get(r.name) || 0));
+    const head = `<div class="legend-head"><div>武器</div><div>击杀</div><div>伤害</div></div>`;
+    const body = rows.map((r) => {
+      const d = dmg.get(r.name) || 0;
+      const acc = r.shots && r.hits != null && r.hits <= r.shots
+        ? `命中率 ${((r.hits / r.shots) * 100).toFixed(1)}% · ` : "";
+      const tip = r.headshots != null
+        ? `${acc}爆头 ${Number(r.headshots).toLocaleString()}${r.is_calibrated ? " · EA校准" : ""}`
+        : (r.is_calibrated ? "EA校准" : "");
+      return `<div class="legend-row"${tip ? ` title="${tip}"` : ""}>
+        <div class="legend-name">${weaponNameOnly(r.name)}${r.is_calibrated ? '<span class="cal-badge">校准</span>' : ""}</div>
+        <div class="legend-metric"><div class="bar-track"><div class="bar bar-kills" style="width:${(r.value / maxK) * 100}%"></div></div><span class="metric-val">${fmtCompact(r.value)}</span></div>
+        <div class="legend-metric"><div class="bar-track"><div class="bar bar-damage" style="width:${(d / maxD) * 100}%"></div></div><span class="metric-val">${fmtCompact(d)}</span></div>
+      </div>`;
+    }).join("");
+    els.weaponList.innerHTML = head + body;
+  }
+
   async function loadBreakdown() {
     const b = await API.getBreakdown(state.playerId);
-    // 武器精通：EA 校准后的官方数据（补齐追踪器看不到的武器 + 爆头/命中率）
-    const wshow = b.weapons.length > 0;
-    els.weaponChart.style.display = wshow ? "block" : "none";
-    els.weaponEmpty.hidden = wshow;
-    if (wshow) Charts.weaponBar("weapon-chart", b.weapons.map((w) => ({
-      name: trackerCn(w.name), value: w.value,
-      headshots: w.headshots, shots: w.shots, hits: w.hits,
-      calibrated: w.is_calibrated,
-    })));
-    // 武器伤害
-    const wdshow = (b.weapon_damage || []).length > 0;
-    els.weaponDamageChart.style.display = wdshow ? "block" : "none";
-    els.weaponDamageEmpty.hidden = wdshow;
-    if (wdshow) Charts.weaponBar("weapon-damage-chart", b.weapon_damage.map((w) => ({
-      name: trackerCnDamage(w.name), value: w.value,
-      headshots: w.headshots, shots: w.shots, hits: w.hits,
-      calibrated: w.is_calibrated,
-    })));
+    // 武器战绩：EA 校准后的官方数据（补齐追踪器看不到的武器 + 爆头/命中率）
+    state.weaponDamage = b.weapon_damage || [];
+    renderWeaponRows(b.weapons || []);
     // 主打传奇按校准后的击杀重新排序（陈旧追踪器会低估场次多的传奇）
     const cal = state.calibration || {};
     const ranked = [...(b.legends || [])].map((l) => {

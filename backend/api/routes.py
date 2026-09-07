@@ -723,17 +723,20 @@ async def get_breakdown(
             )
             for w in weapon_report.weapons if (w.calibrated_kills or 0) > 0
         ]
-        weapon_damage = [
-            WeaponStat(
-                name=w.weapon,
-                value=w.calibrated_damage or 0,
-                headshots=w.headshots,
-                shots=w.shots,
-                hits=w.hits,
-                is_calibrated=w.is_calibrated,
-            )
-            for w in weapon_report.weapons if (w.calibrated_damage or 0) > 0
-        ]
+        weapon_damage = sorted(
+            [
+                WeaponStat(
+                    name=w.weapon,
+                    value=w.calibrated_damage or 0,
+                    headshots=w.headshots,
+                    shots=w.shots,
+                    hits=w.hits,
+                    is_calibrated=w.is_calibrated,
+                )
+                for w in weapon_report.weapons if (w.calibrated_damage or 0) > 0
+            ],
+            key=lambda w: w.value, reverse=True,
+        )
     else:
         weapons = _merge_mastery(recent_raw, "_kills")
         weapon_damage = _merge_mastery(recent_raw, "_damage_done")

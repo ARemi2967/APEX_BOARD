@@ -107,49 +107,6 @@ const Charts = (() => {
     });
   }
 
-  // ---- weapon kills (horizontal bar) ----
-  function weaponBar(elId, rows) {
-    const chart = mount(elId);
-    if (!chart) return;
-    // EA 校准行带 headshots/shots/hits，悬浮时展示爆头与命中率
-    // （霰弹枪的 hits 按弹丸计 > shots，命中率无意义，不展示）
-    const tipFormatter = (p) => {
-      const row = rows.find((r) => r.name === p[0].axisValue) || {};
-      const acc = row.shots && row.hits != null && row.hits <= row.shots
-        ? ` · 命中率 ${((row.hits / row.shots) * 100).toFixed(1)}%` : "";
-      const hs = row.headshots != null ? `<br/>爆头 <b>${Number(row.headshots).toLocaleString()}</b>${acc}` : "";
-      const cal = row.calibrated ? ` <span style="color:${AMBER}">[校准]</span>` : "";
-      return `${p[0].axisValue}${cal}<br/>${p[0].marker} <b>${Number(p[0].value).toLocaleString()}</b>${hs}`;
-    };
-    chart.setOption({
-      backgroundColor: "transparent",
-      textStyle: { color: "#c9ced9", fontFamily: "Inter, sans-serif" },
-      tooltip: {
-        trigger: "axis", axisPointer: { type: "shadow" },
-        backgroundColor: "#16181f", borderColor: "#2a2f3c", textStyle: { color: "#e6e8ee" },
-        formatter: tipFormatter,
-      },
-      grid: { left: 8, right: 40, top: 10, bottom: 10, containLabel: true },
-      xAxis: { type: "value", axisLine: { show: false }, splitLine, axisLabel: { color: axisColor, fontSize: 11 } },
-      yAxis: {
-        type: "category", data: rows.map((r) => r.name).reverse(),
-        axisLine: { show: false }, axisTick: { show: false },
-        axisLabel: { color: "#c9ced9", fontSize: 12 },
-      },
-      series: [{
-        type: "bar", data: rows.map((r) => r.value).reverse(), barWidth: "55%",
-        itemStyle: {
-          color: {
-            type: "linear", x: 0, y: 0, x2: 1, y2: 0,
-            colorStops: [{ offset: 0, color: "#b21f20" }, { offset: 1, color: AMBER }],
-          },
-          borderRadius: [0, 4, 4, 0],
-        },
-        label: { show: true, position: "right", color: "#c9ced9", fontSize: 11, fontFamily: "Chakra Petch, sans-serif" },
-      }],
-    });
-  }
-
   // ---- daily increment bars (per-day gain) ----
   function dailyBar(elId, rows, label) {
     const chart = mount(elId);
@@ -178,5 +135,5 @@ const Charts = (() => {
     });
   }
 
-  return { trend, dailyBar, rank, weaponBar, resizeAll };
+  return { trend, dailyBar, rank, resizeAll };
 })();
