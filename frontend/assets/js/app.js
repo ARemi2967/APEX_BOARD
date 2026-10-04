@@ -5,11 +5,12 @@
     calibration: {}, calibTotals: null, cur: null, weaponDamage: [],
   };
 
-  // 趋势指标：dailyGain=每日从零开始的累计增量折线；cumulative=绝对总分；daily=每日增量柱
+  // 趋势指标：dailyLine=每日增量的平滑折线（每天一个点）；daily=每日增量柱。
+  // 伤害=红 击杀=绿 均伤=橙，三条线颜色区分。
   const TREND_METRICS = {
-    damage: { label: "伤害", mode: "dailyGain", hist: "damage" },
-    kills: { label: "击杀", mode: "dailyGain", hist: "kills" },
-    rank_score: { label: "段位分", mode: "cumulative", hist: "rank_score" },
+    damage: { label: "伤害", mode: "dailyLine", hist: "damage", color: "#DA292A", area: "rgba(218,41,42,0.16)" },
+    kills: { label: "击杀", mode: "dailyLine", hist: "kills", color: "#4ade80", area: "rgba(74,222,128,0.12)" },
+    avg_damage: { label: "均伤", mode: "dailyAvg" },
     rank_delta: { label: "段位变化", mode: "daily", hist: "rank_score", seasonAware: true },
   };
 
@@ -309,19 +310,6 @@
     return Object.entries(byDay).map(([day, v]) => ({ day, delta: (v.last ?? 0) - (v.first ?? 0) }));
   }
 
-  // 每日归零累计增量折线：每天减去当天第一个值，午夜自动归零
-  function dailyGainLine(points) {
-    const dayFirst = {};
-    for (const p of points) {
-      const k = dayKey(p.captured_at);
-      if (!(k in dayFirst) && p.value != null) dayFirst[k] = p.value;
-    }
-    return points.map((p) => {
-      const base = dayFirst[dayKey(p.captured_at)] || 0;
-      return { captured_at: p.captured_at, value: p.value == null ? null : p.value - base };
-    });
-  }
-
   function dailyDeltas(points) {
     // 按天累加"同赛季且非0"的步长 —— 跳过赛季重置(跨赛季)和定级(涉及0的步)
     const byDay = {};
@@ -341,6 +329,23 @@
 
   async function loadTrend() {
     const cfg = TREND_METRICS[state.metric] || TREND_METRICS.damage;
+    // 均伤：并发取击杀/伤害两条序列，按天算 增量伤害/增量击杀
+    if (cfg.mode === "dailyAvg") {
+      const [hk, hd] = await Promise.all([
+        API.getHistory(state.playerId, "kills", 7),
+        API.getHistory(state.playerId, "damage", 7),
+      ]);
+      const kByDay = Object.fromEntries(simpleDailyDeltas(hk.points || []).map((x) => [x.day, x.delta]));
+      const rows = simpleDailyDeltas(hd.points || []).map((x) => ({
+        day: x.day,
+        delta: (kByDay[x.day] || 0) > 0 && x.delta != null ? x.delta / kByDay[x.day] : null,
+      }));
+      const showEmpty = rows.length === 0;
+      els.trendChart.style.display = showEmpty ? "none" : "block";
+      els.trendEmpty.hidden = !showEmpty;
+      if (!showEmpty) Charts.dailyLine("trend-chart", rows, cfg.label);
+      return;
+    }
     const hist = await API.getHistory(state.playerId, cfg.hist, 7);
     let points = hist.points || [];
     const showEmpty = points.length === 0;
@@ -352,12 +357,8 @@
       Charts.dailyBar("trend-chart", deltas, cfg.label);
       return;
     }
-    if (cfg.mode === "dailyGain") {
-      // 每天从0开始的累计增量折线：有变化往上走，午夜归零
-      Charts.trend("trend-chart", dailyGainLine(points), cfg.label);
-      return;
-    }
-    Charts.trend("trend-chart", points, cfg.label);
+    // dailyLine：每日增量的平滑折线（每天一个点，三色区分）
+    Charts.dailyLine("trend-chart", simpleDailyDeltas(points), cfg.label, cfg.color, cfg.area);
   }
 
   async function loadLegends() {
@@ -402,12 +403,25 @@
     els.todayReport.classList.toggle("is-yesterday", isYesterday);
     setToday("kills", showData.kills); setToday("damage", showData.damage);
     setToday("rank_score", showData.rank_score);
+    // 今日均伤 = 伤害/击杀（击杀为 0 时无意义，显示 —）
+    const avgNode = document.querySelector('[data-today="avg_damage"]');
+    if (avgNode) {
+      avgNode.classList.remove("is-up", "is-down", "is-flat");
+      if ((showData.kills || 0) > 0 && showData.damage != null) {
+        avgNode.classList.add("is-up");
+        avgNode.textContent = Math.round(showData.damage / showData.kills).toLocaleString();
+      } else {
+        avgNode.classList.add("is-flat");
+        avgNode.textContent = "—";
+      }
+    }
     const labels = els.todayReport.querySelectorAll(".today-label");
     const prefix = isYesterday ? "昨日" : "今日";
-    if (labels.length >= 3) {
+    if (labels.length >= 4) {
       labels[0].textContent = `${prefix}击杀`;
       labels[1].textContent = `${prefix}伤害`;
-      labels[2].textContent = `${prefix} RP`;
+      labels[2].textContent = `${prefix}均伤`;
+      labels[3].textContent = `${prefix} RP`;
     }
   }
 

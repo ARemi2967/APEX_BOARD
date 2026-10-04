@@ -42,40 +42,6 @@ const Charts = (() => {
     return String(v);
   }
 
-  // ---- trend line (cumulative metric over time) ----
-  function trend(elId, points, metricLabel) {
-    const chart = mount(elId);
-    if (!chart) return;
-    const xs = points.map((p) => fmtTime(p.captured_at));
-    const ys = points.map((p) => (p.value == null ? null : p.value));
-    chart.setOption({
-      backgroundColor: "transparent",
-      color: [ACCENT],
-      textStyle: { color: "#c9ced9", fontFamily: "Inter, sans-serif" },
-      tooltip: {
-        trigger: "axis",
-        backgroundColor: "#16181f",
-        borderColor: "#2a2f3c",
-        textStyle: { color: "#e6e8ee" },
-      },
-      grid: GRID,
-      xAxis: { type: "category", data: xs, boundaryGap: false, axisLine, axisLabel: { color: axisColor, fontSize: 11 } },
-      yAxis: { type: "value", axisLine: { show: false }, splitLine, axisLabel: { color: axisColor, fontSize: 11, formatter: (v) => fmtAxis(v) } },
-      series: [{
-        name: metricLabel,
-        type: "line",
-        smooth: true,
-        symbol: "circle",
-        symbolSize: 7,
-        connectNulls: true,
-        data: ys,
-        lineStyle: { color: ACCENT, width: 3 },
-        itemStyle: { color: ACCENT, borderColor: "#fff", borderWidth: 1 },
-        areaStyle: { color: "rgba(218,41,42,0.18)" },
-      }],
-    });
-  }
-
   // ---- rank progress (stepped RP line) ----
   function rank(elId, points) {
     const chart = mount(elId);
@@ -103,6 +69,36 @@ const Charts = (() => {
         data: ys,
         lineStyle: { color: AMBER, width: 2 },
         itemStyle: { color: AMBER },
+      }],
+    });
+  }
+
+  // ---- daily one-point-per-day line (daily delta, e.g. 均伤/伤害/击杀) ----
+  function dailyLine(elId, rows, label, color = AMBER, areaColor = "rgba(255,165,82,0.14)") {
+    const chart = mount(elId);
+    if (!chart) return;
+    chart.setOption({
+      backgroundColor: "transparent",
+      textStyle: { color: "#c9ced9", fontFamily: "Inter, sans-serif" },
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "#16181f", borderColor: "#2a2f3c", textStyle: { color: "#e6e8ee" },
+        valueFormatter: (v) => (v == null ? "—" : Math.round(v).toLocaleString()),
+      },
+      grid: GRID,
+      xAxis: { type: "category", data: rows.map((r) => r.day), boundaryGap: false, axisLine, axisLabel: { color: axisColor, fontSize: 11 } },
+      yAxis: { type: "value", axisLine: { show: false }, splitLine, axisLabel: { color: axisColor, fontSize: 11, formatter: (v) => fmtAxis(v) }, scale: true },
+      series: [{
+        name: label,
+        type: "line",
+        smooth: true,
+        connectNulls: true,
+        symbol: "circle",
+        symbolSize: 7,
+        data: rows.map((r) => r.delta),
+        lineStyle: { color, width: 3 },
+        itemStyle: { color, borderColor: "#fff", borderWidth: 1 },
+        areaStyle: { color: areaColor },
       }],
     });
   }
@@ -135,5 +131,5 @@ const Charts = (() => {
     });
   }
 
-  return { trend, dailyBar, rank, resizeAll };
+  return { dailyBar, dailyLine, rank, resizeAll };
 })();
